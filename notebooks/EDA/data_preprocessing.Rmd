@@ -1,0 +1,60 @@
+---
+title: "Data Preprocessing"
+author: "Dmitrii Belousov"
+date: "2024-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# Data Import 
+
+```{r}
+data_raw <- read.csv("../../raw_data/AI_Tcells_для ЕА - Sheet1.csv")
+data_raw %>% 
+  head()
+```
+
+# Preprocessing
+
+```{r}
+data_raw %>% 
+  separate(Names, into = c("part_1", "Population"), sep = "/") %>% 
+  separate(part_1, into = c("part_1", "Source"), sep = "_") %>% 
+  separate(part_1, into = c("cGVHD_day", "Collection_Day"), sep = "\\+") %>% 
+  mutate(cGVHD_day = na_if(str_squish(cGVHD_day), ""),
+         Abs_Value = as.numeric(str_replace_all(Abs_Value, ",", ".")),
+         across(c(Collection_Day, Abs_Value), as.numeric),
+         across(c(cGVHD_day, Source, Population), as.factor)) %>% 
+  mutate(Population = gsub("ЕМ", "EM", Population),
+         Population = gsub("ТM", "TM", Population),
+         Population = gsub("ТЕ", "TE", Population),
+         Population = gsub("ТREG", "TREG", Population),
+         Population = gsub("СТАР", "CTAP", Population),
+         Population = gsub("СМ", "CM", Population))-> data
+
+data %>% 
+  head()
+```
+
+```{r}
+data %>% 
+  pivot_wider(names_from = Population, values_from = Abs_Value) %>% 
+  write_csv("../../data/data_wide.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
