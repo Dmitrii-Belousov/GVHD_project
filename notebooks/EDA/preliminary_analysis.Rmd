@@ -22,9 +22,10 @@ library(grid)
 # install.packages("ggpubr")
 # install.packages("gridExtra")
 # install.packages("grid")
-renv::snapshot(type = "all")
+# renv::snapshot(type = "all")
 ```
-```{r}
+
+```{r, echo=FALSE}
 
 palette <- c(
  "4_TFH" = "#3B0A45",  # Deep plum, sophisticated and rich
@@ -39,17 +40,17 @@ palette <- c(
 
 # Data Import
 
-```{r}
+```{r, echo=FALSE}
 data <- read_csv("../../data/data_wide.csv")
 data %>% head()
 ```
-```{r}
+```{r, echo=FALSE}
 data %>% glimpse()
 ```
 
 # let's look inside
 
-```{r}
+```{r, echo=FALSE}
 
 palette = c("#3B0A45", "#1A3D6B", "#6D9A3B", "#D66F41", "#97B498", 
             "#9B3D53", "#607DAB", "#B94553", "#0063AB", "#007670", 
@@ -88,12 +89,15 @@ ridge_plot <- function(data,
 } 
 ```
 
+```{r, echo=FALSE}
+breaks = c(0.005, 0.05, 0.5, 5, 5, 50, 500)
+```
 
 
 
 # cGVHD time discretization
 
-```{r}
+```{r, echo=FALSE}
 
 label_data <- data.frame(
   x = c((90 + 120)/2, (120 + 210)/2, (210 + 365)/2, (365 + 500)/2),
@@ -115,7 +119,7 @@ data %>%
   theme_bw()
 ```
 
-```{r}
+```{r, echo=FALSE}
 data <- data %>% 
   mutate(cGVHD_time_discrete = factor(case_when(
     cGVHD_time < 120 ~ "early", 
@@ -125,8 +129,17 @@ data <- data %>%
   ), levels = c("early", "intermediate", "late", "extralate", NA)))
 ```
 
-```{r}
+```{r, echo=FALSE}
+data <- data %>% 
+  mutate(
+    Collection_time = if_else(Collection_Day > cGVHD_time | !is.na(cGVHD_day), "Post", "Pre"),
+    Collection_time = factor(if_else(is.na(Collection_time), "Never", Collection_time), levels=c("Never", "Pre", "Post")),
+    Post_cGVHD_time = if_else(!is.na(cGVHD_day), Collection_Day, NA),
+    Post_cGVHD_time = if_else(Collection_time == "Post" & is.na(cGVHD_day), Collection_Day - cGVHD_time, Post_cGVHD_time),
+  ) 
 
+data %>% 
+  write_csv("../../data/data_wide_preproc.csv")
 ```
 
 
@@ -134,7 +147,7 @@ data <- data %>%
 # CD4+ compartment evaluation
 ## Major CD4+ T helper populations
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4_"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -143,13 +156,11 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
 
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4_"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4_"), names_to = "Population", values_to = "Count") %>% 
@@ -160,10 +171,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -178,10 +187,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "early" = "#3D527A", 
   "intermediate" = "#717788", 
@@ -199,17 +207,19 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=8, fig.width=15}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, 
           align = "v")
 ```
 
-```{r}
+```{r, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4_")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -221,9 +231,100 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+data %>% 
+  select(starts_with("4_"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4_"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  theme(axis.text.x = element_text(angle = 30)) +
+  theme_bw()
+```
+
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4_"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4_"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4_"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4_"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4_"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4_"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4_"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4_"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ compartment by specific markers
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -232,13 +333,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4+"), names_to = "Population", values_to = "Count") %>% 
@@ -249,10 +347,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -267,10 +363,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -285,16 +380,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -307,9 +404,79 @@ data %>%
   
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4+"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4+"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4+"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4+"), names_to = "Population", values_to = "Count") %>%  
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Naïve T cells
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4NV") & !starts_with("4NV+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -319,13 +486,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4NV") & !starts_with("4NV+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4NV") & !starts_with("4NV+"), names_to = "Population", values_to = "Count") %>% 
@@ -337,10 +501,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -356,10 +518,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -375,16 +536,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4NV") & !starts_with("4NV+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -396,9 +559,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4NV"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4NV"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4NV"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4NV"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Naïve T cells by specific markers
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4NV+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -408,13 +645,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4NV+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4NV+"), names_to = "Population", values_to = "Count") %>% 
@@ -426,10 +660,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -445,10 +677,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -464,16 +695,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4NV+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -485,9 +718,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4NV+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4NV+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4NV+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4NV+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4NV+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4NV+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4NV+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4NV+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Effector Memory T cells
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4EM") & !starts_with("4EM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -497,13 +804,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4EM") & !starts_with("4EM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4EM") & !starts_with("4EM+"), names_to = "Population", values_to = "Count") %>% 
@@ -515,10 +819,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -534,10 +836,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -553,16 +854,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4EM") & !starts_with("4EM+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -574,9 +877,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4EM") & !starts_with("4EM+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4EM") & !starts_with("4EM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4EM") & !starts_with("4EM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4EM") & !starts_with("4EM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Effector Memory T cells by specific markers
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4EM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -586,13 +963,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4EM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4EM+"), names_to = "Population", values_to = "Count") %>% 
@@ -604,10 +978,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -623,10 +995,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -642,16 +1013,19 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4EM+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -663,9 +1037,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4EM+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4EM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4EM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4EM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4EM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Central Memory T cells
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4CM") & !starts_with("4CM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -675,13 +1123,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4CM") & !starts_with("4CM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4CM") & !starts_with("4CM+"), names_to = "Population", values_to = "Count") %>% 
@@ -693,10 +1138,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -712,10 +1155,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -731,16 +1173,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4CM") & !starts_with("4CM+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -753,9 +1197,83 @@ data %>%
   
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=15, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4CM") & !starts_with("4CM+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4CM") & !starts_with("4CM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4CM") & !starts_with("4CM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4CM") & !starts_with("4CM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Effector Memory T cells by specific markers
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4CM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -765,13 +1283,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4CM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4CM+"), names_to = "Population", values_to = "Count") %>% 
@@ -783,10 +1298,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -802,10 +1315,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -821,16 +1333,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4CM+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -842,9 +1356,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4CM+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4CM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4CM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4CM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Memory T cell compartment
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4TM") & !starts_with("4TM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -854,13 +1442,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4TM") & !starts_with("4TM+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4TM") & !starts_with("4TM+"), names_to = "Population", values_to = "Count") %>% 
@@ -872,10 +1457,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -891,10 +1474,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -910,16 +1492,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4TM") & !starts_with("4TM+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -931,9 +1515,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4TM") & !starts_with("4TM+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4TM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4TM") & !starts_with("4TM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4TM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4TM") & !starts_with("4TM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4TM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4TM") & !starts_with("4TM+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4TM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Effector T cells compartment
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4TE") & !starts_with("4TE+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -943,13 +1601,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4TE") & !starts_with("4TE+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("4TE") & !starts_with("4TE+"), names_to = "Population", values_to = "Count") %>% 
@@ -961,10 +1616,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -980,10 +1633,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -999,16 +1651,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4TE") & !starts_with("4TE+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1021,9 +1675,83 @@ data %>%
   
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(starts_with("4TE") & !starts_with("4TE+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = starts_with("4TE") & !starts_with("4TE+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4TE") & !starts_with("4TE+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = starts_with("4TE") & !starts_with("4TE+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4TE") & !starts_with("4TE+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = starts_with("4TE") & !starts_with("4TE+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(starts_with("4TE") & !starts_with("4TE+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = starts_with("4TE") & !starts_with("4TE+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## CD4+ Effector T cells compartment by specific markers
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("4TE+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -1033,13 +1761,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4TE+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(starts_with("4TE+"), names_to = "Population", values_to = "Count") %>% 
@@ -1051,10 +1776,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -1070,10 +1793,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -1089,16 +1811,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4TE+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1113,7 +1837,7 @@ data %>%
 
 ## СD4+ Tregs
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(contains("4TREG"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -1123,13 +1847,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(contains("4TREG"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(contains("TREG"), names_to = "Population", values_to = "Count") %>% 
@@ -1141,10 +1862,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -1160,10 +1879,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -1179,16 +1897,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(contains("4TREG")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1201,11 +1921,85 @@ data %>%
   
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(contains("4TREG"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = contains("4TREG"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("4TREG"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = contains("4TREG"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("4TREG"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = contains("4TREG"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("4TREG"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = contains("4TREG"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 # CD8+ compartment evaluation
 
 ## CD8+ compartment by specific markers
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("8+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -1214,13 +2008,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8+"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("8+"), names_to = "Population", values_to = "Count") %>% 
@@ -1231,10 +2022,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -1249,10 +2038,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -1267,16 +2055,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8+")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1289,9 +2079,83 @@ data %>%
   
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(contains("8+"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = contains("8+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = contains("8+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = contains("8+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8+"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = contains("8+"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## Effector Memory CD8+ T cells
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("8EMTM"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -1300,13 +2164,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8EMTM"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("8EMTM"), names_to = "Population", values_to = "Count") %>% 
@@ -1317,10 +2178,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -1335,10 +2194,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -1353,16 +2211,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8EMTM")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1375,9 +2235,83 @@ data %>%
   
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(contains("8EMTM"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = contains("8EMTM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8EMTM"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = contains("8EMTM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8EMTM"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = contains("8EMTM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8EMTM"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = contains("8EMTM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## Naïve CD8+ T cells
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("8NV"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -1387,13 +2321,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8NV"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("8NV"), names_to = "Population", values_to = "Count") %>% 
@@ -1405,10 +2336,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -1424,10 +2353,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -1443,16 +2371,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8NV")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1464,9 +2394,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(contains("8NV"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = contains("8NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8NV"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = contains("8NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8NV"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = contains("8NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8NV"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = contains("8NV"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## Central Memory CD8+ T cells
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("8CM"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -1476,13 +2480,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8CM"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("8CM"), names_to = "Population", values_to = "Count") %>% 
@@ -1494,10 +2495,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -1513,10 +2512,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -1532,16 +2530,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8CM")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1553,9 +2553,83 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+
+bp_total <- data %>% 
+  select(contains("8CM"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = contains("8CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8CM"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = contains("8CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8CM"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = contains("8CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8CM"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = contains("8CM"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
+
 ## Effector CD8+ T cells
 
-```{r}
+```{r, echo=FALSE}
 density <- data %>% 
   select(starts_with("8TE"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
@@ -1565,13 +2639,10 @@ density <- data %>%
   mutate(Count = Count + 1) %>% 
   ridge_plot(palette = palette, log_scale = TRUE, drop_tick_labs = FALSE)
 
-```
-
-```{r}
-
 time_palette <- c("#21395F", "#3D527A", "#5E729C", "#8093BF", "#A3B6E4")
 
 box_by_day <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8TE"), Collection_Day) %>% 
   filter(!is.na(Collection_Day)) %>% 
   pivot_longer(cols = starts_with("8TE"), names_to = "Population", values_to = "Count") %>% 
@@ -1583,10 +2654,8 @@ box_by_day <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
-
-```{r}
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
 cgvhd_palette <- c("#AF737D", "#7083AF")
 
@@ -1602,10 +2671,9 @@ box_by_cgvhd <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
-```
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
-```{r}
 cgvhd_time_palette <- c(
   "#3D527A", "#717788", "#AF737D", "#79424D"
 )
@@ -1621,16 +2689,18 @@ box_by_cgvhd_time <- data %>%
               color='black', shape = 21, size = 0.5) +
   scale_fill_manual(values = cgvhd_time_palette) +
   scale_y_log10(breaks = breaks, labels = scales::comma) +
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 ```
 
-```{r, fig.hight=5, fig.width=20}
+```{r, fig.hight=20, fig.width=20, echo=FALSE}
 ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time), 
           ncol = 2, nrow = 2, align = "v")
 ```
 
-```{r, fig.hight=10, fig.width=10}
+```{r, fig.hight=10, fig.width=10, echo=FALSE}
 data %>% 
+  filter(is.na(cGVHD_day)) %>% 
   select(starts_with("8TE")) %>% 
   log1p() %>% 
   ggpairs(progress = F, lower = list(continuous = wrap("smooth", 
@@ -1642,7 +2712,79 @@ data %>%
   theme(strip.text = element_text(size = 5))
 ```
 
+```{r, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
 
+bp_total <- data %>% 
+  select(contains("8TE"), Collection_time) %>% 
+  filter(!is.na(Collection_time)) %>% 
+  pivot_longer(cols = contains("8TE"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "Total") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8TE"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("30", "60")) %>% 
+  pivot_longer(cols = contains("8TE"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "30-60 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp2 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8TE"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  pivot_longer(cols = contains("8TE"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "90 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+bp3 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  select(contains("8TE"), Collection_time, Collection_Day) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("180", "365")) %>% 
+  pivot_longer(cols = contains("8TE"), names_to = "Population", values_to = "Count") %>%  
+  mutate(Count = Count + 1) %>% 
+  ggplot(aes(x = Population, y = Count, fill = Collection_time)) +
+  geom_boxplot(position='dodge', outliers = F) +
+  geom_jitter(position=position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              color='black', shape = 21, size = 0.5) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  scale_y_log10(breaks = breaks, labels = scales::comma) +
+  labs(title = "180-365 days") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
+          ncol = 2, nrow = 2, align = "v", legend = "none")
+```
 
 
 
