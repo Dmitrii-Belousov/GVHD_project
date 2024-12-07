@@ -1,0 +1,866 @@
+---
+title: "Clustering_preliminary"
+author: "Dmitrii Belousov"
+date: "2024-11-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(ggridges)
+library(GGally)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(cluster)
+library(pheatmap)
+library(caret)
+library(survival)
+library(survminer)
+```
+
+# Data import
+
+```{r}
+data <- read_csv("../../data/data_wide_preproc.csv")
+data %>% head()
+```
+```{r}
+data <- data %>% 
+  mutate(Event = ifelse(is.na(cGVHD_time), 0, 1),
+         Time_CFS = ifelse(is.na(cGVHD_time), Time_OS, cGVHD_time))
+```
+
+```{r}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+```
+
+
+```{r, fig.hight=10, fig.width=10, echo=FALSE, warning=FALSE}
+data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(starts_with("4NV"), Collection_time) %>% 
+  mutate(across(is.numeric, log1p)) %>% 
+  ggpairs(progress = F, 
+          lower = list(continuous = wrap("smooth", 
+                                         alpha = 0.3, 
+                                         size = 1)),
+          mapping = aes(color = Collection_time),
+          diag = list(continuous = wrap("densityDiag", alpha = 0.5))) +
+  scale_color_manual(values = collection_time_point_palette) +
+  scale_fill_manual(values = collection_time_point_palette) +
+  theme_bw() +
+  theme(strip.text = element_text(size = 5), 
+        text = element_text(size = 5))
+  
+  
+```
+
+```{r}
+periods <- c("90")
+
+pca.data <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+  select(starts_with("8EMTM")) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  na.omit() %>% 
+  scale() %>% 
+  prcomp() #%>%
+  #`[[`("x")
+
+
+pcs <- pca.data$x %>% 
+  as.data.frame()
+
+
+pcs$CT <- data %>% 
+  filter(is.na(cGVHD_day) & !is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+  pull(Collection_time)
+
+pcs %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color=CT)) +
+  scale_color_manual(values = collection_time_point_palette) +
+  theme_bw()
+```
+
+
+
+
+```{r}
+subset <- c("4_", "4+", "4", "4EM", "4EM_", "4EM+", 
+            "4CM", "4CM_", "4CM+", "4TM", "4TE", "4TE_", "4TE+", 
+            "TREG", "8+", "8", "8EMTM", "8CM", "8TE", 
+            "TH1", "TH2", "TH17", "TH22", "TFH")
+
+principal_sil_score <- function(subset, periods = c("90")){
+  dists <- data %>% 
+    filter(is.na(cGVHD_day)) %>% 
+    filter(!is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+    select(contains(subset)) %>% 
+    log1p() %>% 
+    na.omit() %>% 
+    scale() %>% 
+    prcomp() %>%
+    `[[`("x") %>% 
+    dist()
+  
+  labels <- data %>% 
+    filter(is.na(cGVHD_day) & !is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+    mutate(Collection_time = as.factor(Collection_time)) %>% 
+    pull(Collection_time) %>% 
+    as.integer()
+  
+  return(median(silhouette(labels, dists)[,3]))
+}
+
+scores <- sapply(subset, principal_sil_score)
+
+barplot(scores, horiz = F, names.arg = names(scores), cex.names = 0.8, las = 2)
+```
+
+# Correlation clustering
+
+```{r, fig.height=10, fig.width=10}
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, Collection_Day, Event, Time_CFS)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  t() %>% 
+  as.data.frame() 
+
+colnames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+annotation_row_vec <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  pull(Collection_time) %>% 
+  as.data.frame()
+
+rownames(annotation_row_vec) <- colnames(data_subset)
+
+corr_data <- data_subset %>% 
+  as.data.frame() %>% 
+  psych::corr.test(method = "spearman")
+
+corr_data$r %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     border_color = NA, 
+                     annotation_row = annotation_row_vec, 
+                     annotation_colors = list(. = collection_time_point_palette))
+```
+
+```{r}
+cor_res <- corr_data$r %>% 
+  dist(method = "euclidean") %>% 
+  hclust(method = "ward.D2", ) 
+
+cor_res %>% 
+  factoextra::fviz_dend(cex = 0.2, 
+            k = 4, 
+            k_colors = "jco")
+
+labels <- cor_res %>% 
+  cutree(k = 4)
+```
+
+
+```{r, fig.height=10, fig.width=25}
+data_subset_sorted <- data_subset %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  mutate(labels = labels) %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+
+```
+
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new, Collection_time)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7))         
+```
+```{r}
+table(merged$labels, merged$Collection_time)
+```
+
+# Full data clustering
+
+```{r, fig.height=5, fig.width=10}
+
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, 
+                               Collection_Day, Time_CFS, Event)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+res <- data_subset %>% 
+  dist(method = "euclidean") %>% 
+  hclust(method = "ward.D", ) 
+
+res %>% 
+  factoextra::fviz_dend(cex = 0.2, 
+            k = 4, 
+            k_colors = "jco")
+```
+
+```{r, fig.height=10, fig.width=25}
+labels <- res %>% 
+  cutree(k = 4)
+
+data_subset_sorted <- data_subset %>% 
+  mutate(labels = labels) %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+
+```
+
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7))         
+```
+
+```{r}
+merged %>% 
+  View()
+```
+
+
+# PCA clustering
+
+```{r}
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, 
+                               Collection_Day, Time_CFS, Event)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+pc_data <- data_subset %>% 
+  prcomp() %>% 
+  `[[`("x") %>% 
+  as.data.frame()
+
+```
+
+```{r}
+n_clusters <- 10
+wss <- numeric(n_clusters)
+
+set.seed(123)
+
+for (i in 1:n_clusters) {
+  km.out <- kmeans(pc_data, centers = i, nstart = 20)
+  wss[i] <- km.out$tot.withinss
+}
+
+wss_df <- tibble(clusters = 1:n_clusters, 
+                 wss = wss)
+ 
+scree_plot <- ggplot(wss_df, aes(x = clusters, y = wss, group = 1)) +
+    geom_point(size = 4)+
+    geom_line() +
+    scale_x_continuous(breaks = c(2, 4, 6, 8, 10)) +
+    xlab('Number of clusters') +
+    theme_bw()
+scree_plot
+```
+
+```{r}
+res <- kmeans(pc_data, centers = 4, nstart = 20)
+data_subset$labels <- as.factor(res$cluster)
+pc_data$label <- as.factor(res$cluster)
+```
+
+```{r}
+ggplot(data = pc_data, aes(x = PC1, y = PC2, color = label)) +
+  geom_point() +
+  theme_bw()
+```
+
+```{r, fig.height=10, fig.width=25}
+data_subset_sorted <- data_subset %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+```
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7))         
+```
+
+# RFE
+
+```{r}
+periods <- c("90")
+
+y_vec <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+  pull(Collection_time) %>% 
+  as.factor()
+
+X_mat <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, Time_CFS, 
+                               Event, cGVHD_time, Collection_Day)) %>% 
+  log1p() %>% 
+  scale()
+
+subsets = seq(100, 10, by = -10)
+  
+```
+
+```{r}
+set.seed(42)
+
+ctrl <- rfeControl(functions = rfFuncs, 
+                   rerank = TRUE, 
+                   method = "boot",
+                   verbose = FALSE, 
+                   number = 100)
+
+rf <- rfe(x = X_mat, 
+          y = y_vec, 
+          sizes = subsets, 
+          rfeControl = ctrl)
+
+```
+
+```{r}
+rf
+```
+
+```{r}
+trellis.par.set(caretTheme())
+plot(rf, type = c("g", "o"))
+```
+
+```{r}
+optimal.vars <- rf$optVariables
+
+periods <- c("90")
+
+pca.data <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+  select(optimal.vars) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  na.omit() %>% 
+  scale() %>% 
+  prcomp() #%>%
+  #`[[`("x")
+
+
+pcs <- pca.data$x %>% 
+  as.data.frame()
+
+
+pcs$CT <- data %>% 
+  filter(is.na(cGVHD_day) & !is.na(Collection_time) & Collection_Day %in% periods & Collection_time != "Post") %>% 
+  pull(Collection_time)
+
+pcs %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color=CT)) +
+  scale_color_manual(values = collection_time_point_palette) +
+  theme_bw()
+
+pcs %>% 
+  ggplot() +
+  geom_point(aes(x = PC2, y = PC3, color=CT)) +
+  scale_color_manual(values = collection_time_point_palette) +
+  theme_bw()
+
+pcs %>% 
+  ggplot() +
+  geom_point(aes(x = PC3, y = PC4, color=CT)) +
+  scale_color_manual(values = collection_time_point_palette) +
+  theme_bw()
+```
+
+# Total RFE
+
+```{r}
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(optimal.vars)  %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+res <- data_subset %>% 
+  dist(method = "euclidean") %>% 
+  hclust(method = "ward.D", ) 
+
+res %>% 
+  factoextra::fviz_dend(cex = 0.2, 
+            k = 5, 
+            k_colors = "jco")
+```
+
+```{r, fig.height=10, fig.width=15}
+labels <- res %>% 
+  cutree(k = 5)
+
+data_subset_sorted <- data_subset %>% 
+  mutate(labels = labels) %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+
+```
+
+
+```{r, fig.height=5, fig.width=7}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ labels, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.35,
+           pval = TRUE,
+           pval.coord = c(650, 0.7))         
+```
+
+# Correlation RFE clustering
+
+```{r, fig.height=10, fig.width=10}
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(optimal.vars)  %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  t() %>% 
+  as.data.frame() 
+
+colnames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+annotation_row_vec <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  pull(Collection_time) %>% 
+  as.data.frame()
+
+rownames(annotation_row_vec) <- colnames(data_subset)
+
+corr_data <- data_subset %>% 
+  as.data.frame() %>% 
+  psych::corr.test(method = "spearman")
+
+corr_data$r %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     border_color = NA, 
+                     annotation_row = annotation_row_vec, 
+                     annotation_colors = list(. = collection_time_point_palette))
+```
+
+```{r}
+cor_res <- corr_data$r %>% 
+  dist(method = "euclidean") %>% 
+  hclust(method = "ward.D2", ) 
+
+cor_res %>% 
+  factoextra::fviz_dend(cex = 0.2, 
+            k = 5, 
+            k_colors = "jco")
+
+labels <- cor_res %>% 
+  cutree(k = 5)
+```
+
+```{r, fig.height=10, fig.width=15}
+data_subset_sorted <- data_subset %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  mutate(labels = labels) %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+
+```
+
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7))         
+```
+
+# PCA RFE clustering
+
+```{r}
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(optimal.vars) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+pc_data <- data_subset %>% 
+  prcomp() %>% 
+  `[[`("x") %>% 
+  as.data.frame()
+
+```
+
+```{r}
+n_clusters <- 10
+wss <- numeric(n_clusters)
+
+set.seed(123)
+
+for (i in 1:n_clusters) {
+  km.out <- kmeans(pc_data[1:10], centers = i, nstart = 20)
+  wss[i] <- km.out$tot.withinss
+}
+
+wss_df <- tibble(clusters = 1:n_clusters, 
+                 wss = wss)
+ 
+scree_plot <- ggplot(wss_df, aes(x = clusters, y = wss, group = 1)) +
+    geom_point(size = 4)+
+    geom_line() +
+    scale_x_continuous(breaks = c(2, 4, 6, 8, 10)) +
+    xlab('Number of clusters') +
+    theme_bw()
+scree_plot
+```
+
+```{r}
+res <- kmeans(pc_data[1:10], centers = 4, nstart = 20)
+data_subset$labels <- as.factor(res$cluster)
+pc_data$label <- as.factor(res$cluster)
+```
+
+```{r}
+ggplot(data = pc_data, aes(x = PC1, y = PC2, color = label)) +
+  geom_point() +
+  theme_bw()
+```
+
+```{r, fig.height=10, fig.width=15}
+data_subset_sorted <- data_subset %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+```
+
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7))         
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

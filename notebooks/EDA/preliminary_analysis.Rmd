@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, fig.hight=20, fig.width=20, fig.dpi=150, echo=FALSE)
 library(tidyverse)
 library(ggplot2)
 library(ggridges)
@@ -97,7 +97,7 @@ breaks = c(0.005, 0.05, 0.5, 5, 5, 50, 500)
 
 # cGVHD time discretization
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, fig.height=5, fig.width=8}
 
 label_data <- data.frame(
   x = c((90 + 120)/2, (120 + 210)/2, (210 + 365)/2, (365 + 500)/2),
@@ -217,7 +217,7 @@ ggarrange(plotlist = list(density, box_by_day, box_by_cgvhd, box_by_cgvhd_time),
           align = "v")
 ```
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, fig.height=7, fig.width=7}
 data %>% 
   filter(is.na(cGVHD_day)) %>% 
   select(starts_with("4_")) %>% 
@@ -318,6 +318,9 @@ bp3 <- data %>%
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
+```
+
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -469,7 +472,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -628,7 +633,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -787,7 +794,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -946,7 +955,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -1106,7 +1117,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -1266,7 +1279,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -1425,7 +1440,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -1584,7 +1601,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -1744,7 +1763,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -1990,7 +2011,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -2304,7 +2327,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -2463,7 +2488,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -2622,7 +2649,9 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
@@ -2781,12 +2810,68 @@ bp3 <- data %>%
   labs(title = "180-365 days") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
 
+``` {r}
 ggarrange(plotlist = list(bp_total, bp1, bp2, bp3), 
           ncol = 2, nrow = 2, align = "v", legend = "none")
 ```
 
+```{r, fig.height=3, fig.width=5}
+library(factoextra)
 
+pca.data <- data %>% 
+  filter(is.na(cGVHD_day) & !is.na(Collection_time) & Collection_Day %in% c("90")) %>% 
+  select(contains(c("TREG", "4", "8"))) %>%
+  log1p() %>% 
+  na.omit() %>% 
+  scale() %>% 
+  prcomp()
+
+fviz_eig(pca.data, 
+         addlabels = T, 
+         ylim = c(0, 100))
+```
+
+```{r, fig.height=3, fig.width=4, fig.dpi=150}
+```
+
+
+```{r, fig.height=3, fig.width=4, fig.dpi=150}
+periods <- c("90")
+
+pca.data <- data %>% 
+  filter(is.na(cGVHD_day) & !is.na(Collection_time) & Collection_Day %in% periods) %>% 
+  select(contains(c("TREG", "4", "8"))) %>%
+  log1p() %>% 
+  na.omit() %>% 
+  scale() %>% 
+  prcomp()
+
+
+pcs <- pca.data$x %>% 
+  as.data.frame()
+
+
+pcs$CT <- data %>% 
+  filter(is.na(cGVHD_day) & !is.na(Collection_time) & Collection_Day %in% periods) %>% 
+  pull(Collection_time)
+
+pcs %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color=CT)) +
+  scale_color_manual(values = collection_time_point_palette) +
+  theme_bw()
+```
+```{r, fig.height=3, fig.width=4, fig.dpi=150}
+?ggbiplot::ggbiplot
+
+ggbiplot::ggbiplot(pca.data, choices=1:2,
+         scale=1, alpha = 0.5, 
+         groups = as.factor(pcs$CT)) + 
+  scale_color_manual(values = collection_time_point_palette) +
+  theme_bw()
+```
 
 
 
