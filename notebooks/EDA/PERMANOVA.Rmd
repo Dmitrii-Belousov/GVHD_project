@@ -1,0 +1,99 @@
+---
+title: "PERMANOVA"
+author: "Dmitrii Belousov"
+date: "2024-12-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggplot2)
+library(cluster)
+library(pheatmap)
+library(survival)
+library(survminer)
+library(vegan)
+```
+
+```{r}
+data <- read_csv("../../data/data_wide_preproc.csv")
+data <- data %>% 
+  mutate(Event = ifelse(is.na(cGVHD_time), 0, 1),
+         Time_CFS = ifelse(is.na(cGVHD_time), Time_OS, cGVHD_time))
+```
+```{r}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+```
+
+```{r}
+data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
+                          Collection_Day, Source, cGVHD_time_discrete, 
+                          Collection_time, Post_cGVHD_time)) %>% 
+  mutate(across(-Event, log1p), 
+         #across(-Event, scale), 
+         Event = as.factor(Event)) -> data_filtered
+
+event <- data_filtered %>% 
+  pull(Event)
+
+data_filtered <- data_filtered %>% 
+  select(everything(), -Event)
+```
+
+
+
+```{r}
+vernalis <- adonis2(data_filtered ~ event)
+print(vernalis)
+```
+
+```{r}
+vernalis
+```
+```{r}
+total
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
