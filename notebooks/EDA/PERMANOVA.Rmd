@@ -61,9 +61,7 @@ print(vernalis)
 ```{r}
 vernalis
 ```
-```{r}
-total
-```
+
 
 
 

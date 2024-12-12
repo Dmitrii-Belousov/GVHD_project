@@ -1,0 +1,129 @@
+---
+title: "NMF clustering"
+author: "Dmitrii Belousov"
+date: "2024-12-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      root.dir = "~/GVHD_project/notebooks/EDA/")
+library(tidyverse)
+library(ggplot2)
+library(NMF)
+library(Biobase)
+library(pheatmap)
+```
+
+
+
+```{r}
+data <- read_csv("~/GVHD_project/data/data_wide_preproc.csv")
+data <- data %>% 
+  mutate(Event = ifelse(is.na(cGVHD_time), 0, 1),
+         Time_CFS = ifelse(is.na(cGVHD_time), Time_OS, cGVHD_time))
+
+row.names(data) <- data %>% 
+  mutate(ID_new = paste0(round(runif(231, 0, 1000), 0), Collection_time, ID)) %>% 
+  pull(ID_new)
+```
+```{r}
+rownames(data)
+```
+
+
+```{r}
+data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
+                          Collection_Day, Source, cGVHD_time_discrete, 
+                          Collection_time, Post_cGVHD_time)) %>% 
+  mutate(across(-Event, log1p), 
+         #across(-Event, scale), 
+         Event = as.factor(Event)) -> data_filtered
+
+event <- data_filtered %>% 
+  pull(Event)
+
+data_filtered <- data_filtered %>% 
+  select(everything(), -Event) %>% 
+  t() %>% 
+  as.data.frame()
+
+data_filtered_random <- randomize(data_filtered)
+```
+
+```{r}
+estim.r.random <- nmf(data_filtered_random, 2:15, nrun=10, seed=42)
+estim.r <- nmf(data_filtered, 2:15, nrun=10, seed=42)
+```
+
+```{r, fig.height=7, fig.width=12}
+plot(estim.r, estim.r.random)
+```
+```{r fig.height=5, fig.width=8}
+res <- nmf(data_filtered, 7, nrun=100, seed=42)
+
+layout(cbind(1,2))
+basismap(res, subsetRow=TRUE)
+coefmap(res)
+```
+```{r}
+summary(res)
+```
+
+```{r}
+str(res)
+
+```
+
+```{r}
+event <- as.data.frame(event)
+rownames(event) <- paste0("V", rownames(event))
+
+cc <- as.data.frame(predict(res))
+colnames(cc) <- c("consensus")
+```
+
+```{r, fig.height=7, fig.width=10}
+library(RColorBrewer)
+
+event_colors <- setNames(brewer.pal(length(unique(event$event)), "Set2"), unique(event$event))
+cc_colors <- setNames(brewer.pal(length(unique(cc$consensus)), "Pastel1"), unique(cc$consensus))
+
+annotation_colors <- list(event = event_colors, consensus = cc_colors)
+
+order <- cc %>% 
+  arrange(consensus) %>% 
+  rownames()
+
+pheatmap::pheatmap(res@consensus[order, order], 
+                  # cellwidth = 8, cellheight = 8, 
+                     cluster_rows = F, cluster_cols = F,
+                     annotation_col = cbind(event, cc),
+                     annotation_colors = annotation_colors,
+                     border_color = NA)
+```
+```{r}
+
+```
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
