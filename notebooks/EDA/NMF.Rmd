@@ -15,6 +15,8 @@ library(Biobase)
 library(pheatmap)
 library(survival)
 library(survminer)
+library(rstatix)
+library(ggrepel)
 ```
 
 
@@ -201,17 +203,199 @@ ggsurvplot(fit,
 ```
 
 ```{r}
+data_filtered_full <- data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  as.data.frame()
 
+data_filtered_full_cc <- cbind(cc, data_filtered_full) %>% 
+  filter(consensus != 7) %>% 
+  mutate(consensus = as.factor(consensus))
+```
+
+
+```{r}
+stats <- list()
+
+for (i in c(1:6)) {
+  data_internal <- data_filtered_full_cc %>% 
+    mutate(test_col = ifelse(consensus == i, i, "other")) %>% 
+    select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
+                          Collection_Day, Source, cGVHD_time_discrete, 
+                          Collection_time, Post_cGVHD_time, Event, consensus))
+  
+  log2FC <- data_internal %>% 
+    summarise(across(where(is.numeric), 
+                       ~ t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate1 / 
+                        t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate2)) %>% log2()
+  
+  Ps <- data_internal %>% 
+    summarise(across(where(is.numeric), ~ t_test(.x ~ test_col, data = data_internal, 
+                                               detailed = TRUE)$p))
+  
+  stats[[paste(i, "vs. all")]] <- rbind(log2FC, Ps)
+}
 ```
 
 
 
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`1 vs. all` %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(log2FC = V1, p.value = V2) %>% 
+  mutate(DE = ifelse((p.value <= .05 & abs(log2FC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & log2FC > .6) ~ "UP",
+           (DE & log2FC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = colnames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=log2FC, y=-log10(p.value), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
 
 
 
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`2 vs. all` %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(log2FC = V1, p.value = V2) %>% 
+  mutate(DE = ifelse((p.value <= .05 & abs(log2FC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & log2FC > .6) ~ "UP",
+           (DE & log2FC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = colnames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
 
 
+ggplot(data=diff, 
+       aes(x=log2FC, y=-log10(p.value), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
 
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`3 vs. all` %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(log2FC = V1, p.value = V2) %>% 
+  mutate(DE = ifelse((p.value <= .05 & abs(log2FC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & log2FC > .6) ~ "UP",
+           (DE & log2FC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = colnames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=log2FC, y=-log10(p.value), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
+
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`4 vs. all` %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(log2FC = V1, p.value = V2) %>% 
+  mutate(DE = ifelse((p.value <= .05 & abs(log2FC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & log2FC > .6) ~ "UP",
+           (DE & log2FC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = colnames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=log2FC, y=-log10(p.value), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
+
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`5 vs. all` %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(log2FC = V1, p.value = V2) %>% 
+  mutate(DE = ifelse((p.value <= .05 & abs(log2FC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & log2FC > .6) ~ "UP",
+           (DE & log2FC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = colnames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=log2FC, y=-log10(p.value), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
+
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`6 vs. all` %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(log2FC = V1, p.value = V2) %>% 
+  mutate(DE = ifelse((p.value <= .05 & abs(log2FC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & log2FC > .6) ~ "UP",
+           (DE & log2FC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = colnames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=log2FC, y=-log10(p.value), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
 
 
 
