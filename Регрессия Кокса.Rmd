@@ -21,7 +21,7 @@ library(vcov)
 ```
 
 ```{r}
-data <- read_excel("data/raw/AI_Tcells.xlsx", sheet = "Sheet1")
+data <- read.csv("raw_data/AI_Tcells_для ЕА - Sheet1.csv")
 
 # Разделение колонки "Names"
 data <- data %>%
