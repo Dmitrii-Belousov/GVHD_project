@@ -1,0 +1,172 @@
+---
+title: "Регрессия Кокса"
+author: "Sergey"
+date: "2024-12-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Регрессия Кокса
+
+## Загрузка библиотек и данных
+```{r}
+library(tidyverse)
+library(survival)
+library(survminer)
+library(readxl)
+library(vcov)
+```
+
+```{r}
+data <- read_excel("data/raw/AI_Tcells.xlsx", sheet = "Sheet1")
+
+# Разделение колонки "Names"
+data <- data %>%
+  separate(Names, into = c("col", "Population"), sep = "/", extra = "merge") %>%
+  separate(col, into = c("cGVHD_day", "Source"), sep = "_", extra = "merge") %>%
+  mutate(
+    cGVHD_day = as.numeric(sub("\\+", "", cGVHD_day)),
+    Source = as.factor(Source),
+    Population = as.factor(Population)
+  )
+```
+
+## Преобразование числовых значений и обработка NA
+```{r}
+data <- data %>%
+  mutate(
+    Abs_Value = as.numeric(gsub(",", ".", Abs_Value)),
+    Time_OS = as.numeric(Time_OS),
+    cGVHD_time = as.numeric(cGVHD_time)
+  )
+```
+
+## Удаление NA, не относящихся к ключевым столбцам
+```{r}
+data <- data %>%
+  filter(!is.na(Time_OS), !is.na(Abs_Value), !is.na(Population))
+```
+
+## Создание индикатора событий и времени до события
+```{r}
+data <- data %>%
+  mutate(
+    event = ifelse(!is.na(cGVHD_time), 1, 0),
+    time_to_event = ifelse(!is.na(cGVHD_time), cGVHD_time, Time_OS)
+  )
+```
+
+## Фильтрация для отсчета от 90 и 180 дней
+```{r}
+data <- data %>%
+  filter(time_to_event >= 90) %>%
+  mutate(
+    time_from_90 = time_to_event - 90,
+    time_from_180 = ifelse(time_to_event >= 180, time_to_event - 180, NA)
+  )
+```
+## Преобразование в широкий формат для анализа по популяциям
+```{r}
+wide_data <- data %>%
+  pivot_wider(
+    id_cols = c(Source, time_to_event, event),
+    names_from = Population,
+    values_from = Abs_Value
+  )
+```
+
+## Построение модели кокса
+```{r}
+# Модели Кокса для каждой популяции
+cox_results <- list()
+for (pop in unique(data$Population)) {
+  sub_data <- data %>% filter(Population == pop)
+  surv_object <- Surv(time = sub_data$time_to_event, event = sub_data$event)
+  cox_model <- coxph(surv_object ~ Abs_Value, data = sub_data)
+  cox_results[[pop]] <- summary(cox_model)
+}
+```
+
+
+## Визуализация регрессии
+```{r}
+# Визуализация моделей Kaplan-Meier по группам риска для каждой популяции
+km_plots <- list()
+for (pop in unique(data$Population)) {
+  sub_data <- data %>% filter(Population == pop)
+  surv_object <- Surv(time = sub_data$time_to_event, event = sub_data$event)
+  cox_model <- coxph(surv_object ~ Abs_Value, data = sub_data)
+  
+  sub_data$risk_group <- ifelse(predict(cox_model, type = "risk") > median(predict(cox_model, type = "risk")), "High-Risk", "Low-Risk")
+  km_fit <- survfit(surv_object ~ risk_group, data = sub_data)
+  
+  # Создание графика с уникальным заголовком
+  plot <- ggsurvplot(
+    km_fit, 
+    data = sub_data,
+    conf.int = TRUE, 
+    palette = c("blue", "red"), 
+    linetype = "strata", 
+    surv.median.line = "hv",
+    xlab = "Time", 
+    ylab = "Survival Probability",
+    ggtheme = theme_classic(),
+    pval = TRUE,
+    title = paste("Kaplan-Meier Curve for Population:", pop) # Уникальный заголовок
+  )
+  
+  # Сохранение графика в список
+  km_plots[[pop]] <- plot
+}
+
+
+# Сохранение результатов
+list(cox_results = cox_results, km_plots = km_plots)
+
+```
+
+## Выводим значимые результаты
+```{r}
+# Создаем пустой список для хранения результатов
+significant_results <- list()
+
+# Цикл по уникальным популяциям
+for (pop in unique(data$Population)) {
+  # Фильтрация данных по популяции
+  sub_data <- data %>% filter(Population == pop)
+  
+  # Создаем объект выживаемости
+  surv_object <- Surv(time = sub_data$time_to_event, event = sub_data$event)
+  
+  # Строим модель Кокса
+  cox_model <- coxph(surv_object ~ Abs_Value, data = sub_data)
+  
+  # Извлекаем p-value и другие результаты
+  p_value <- summary(cox_model)$coefficients[, "Pr(>|z|)"]  # Правильный способ
+  
+  # Сохраняем только значимые результаты
+  if (p_value < 0.05) {
+    hr <- exp(coef(cox_model))  # Hazard ratio
+    ci <- exp(confint(cox_model))  # 95% доверительный интервал
+    
+    # Создаем строку с результатами
+    significant_results[[pop]] <- data.frame(
+      Population = pop,
+      HR = hr,
+      CI_lower = ci[1],
+      CI_upper = ci[2],
+      p_value = p_value
+    )
+  }
+}
+
+# Объединяем результаты в один датафрейм
+significant_table <- bind_rows(significant_results)
+
+# Просмотр значимых результатов
+print(significant_table)
+
+```
