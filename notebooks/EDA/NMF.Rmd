@@ -17,6 +17,9 @@ library(survival)
 library(survminer)
 library(rstatix)
 library(ggrepel)
+library(randomForest)
+library(caret)
+library(pROC)
 ```
 
 
@@ -31,10 +34,6 @@ row.names(data) <- data %>%
   mutate(ID_new = paste0(round(runif(231, 0, 1000), 0), Collection_time, ID)) %>% 
   pull(ID_new)
 ```
-```{r}
-rownames(data)
-```
-
 
 ```{r}
 data %>% 
@@ -396,6 +395,131 @@ ggplot(data=diff,
         geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
         geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
 ```
+
+```{r}
+top_features_c12 <- c(names(top_features_all[["Cluster_1"]]), 
+  names(top_features_all[["Cluster_2"]]))
+```
+
+```{r}
+top_feature_names
+```
+
+
+```{r}
+data_filtered_full_cc %>% 
+  select(all_of(top_feature_names)) %>% log1p()-> X
+
+y <- data_filtered_full_cc %>% select(Event) %>% mutate(Event = as.factor(Event)) %>% pull(Event)
+  
+```
+
+```{r}
+set.seed(42)
+
+train_index <- createDataPartition(data_filtered_full_cc$Event,
+                                   p = 0.8,
+                                   list = FALSE,
+                                   times = 1)
+
+X_train <- X[train_index,]
+X_test <- X[-train_index,]
+
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+rf_model_1 <- randomForest(x = X_train, 
+                           y = y_train, 
+                           importance = TRUE, 
+                           ntree = 30, 
+                           nodesize = 2)
+varImpPlot(rf_model_1)
+```
+
+```{r}
+preds <- predict(rf_model_1, X_test, 
+                 # type="prob"
+                 )
+confusionMatrix(preds, y_test)
+```
+
+```{r}
+preds <- predict(rf_model_1, X, 
+                 # type="prob"
+                 )
+confusionMatrix(preds, y)
+```
+
+
+```{r}
+probs <- predict(rf_model_1, X_test, type="prob")
+roc_obj <- roc(y_test, probs[,1])
+
+optimal_coords <- coords(
+  roc_obj, 
+  "best", 
+  ret = c("threshold", "sensitivity", "specificity"),
+  best.method = "youden"
+)
+
+optimal_coords
+  
+plot.roc(roc_obj, print.thres = "best", print.thres.best.method = "youden", col = "blue")
+```
+
+
+```{r}
+set.seed(42)
+
+rf_control <- trainControl(method = "LOOCV", 
+                            search = "grid", 
+                            verboseIter = T, 
+                            #number = 3,
+                            #sampling = "up"
+                           )
+
+rf_grid <- expand.grid(mtry = length(X_train),
+                       splitrule = c("gini", "extratrees"),
+                       min.node.size = c(1, 3, 5, 10))
+
+train_ds <- X_train %>% 
+  mutate(Event = y_train)
+
+rf_gridsearch <- train(Event ~ ., 
+                       data = train_ds,
+                       method = 'ranger',
+                       metric = 'Accuracy',
+                       tuneGrid = rf_grid)
+
+print(rf_gridsearch)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
