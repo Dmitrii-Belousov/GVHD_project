@@ -1,0 +1,800 @@
+---
+title: "Project_cGVHD"
+author: "NataliaLaskina"
+date: "2024-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(flextable)
+library(gtsummary)
+library(broom)
+library(broom.helpers)
+library(forestmodel)
+library(ggResidpanel)
+library(lmtest)
+library(car)
+library(emmeans)
+library(patchwork)
+library(corrplot) 
+library(cluster)
+library(ggpubr)
+library(rstatix)
+library(ggstatsplot)
+library(ggpubr)
+library(ggcorrplot)
+library(pheatmap)
+library(corrr)
+library(ggfortify)
+library(factoextra)
+library(FactoMineR)
+library(ggbiplot)
+library(plotly)
+library(ggrepel)
+library(tidymodels)
+library(embed)
+library(viridis)
+library(gridExtra)
+library(glmnet)
+library(Matrix)
+library(reshape2)
+library(NbClust)
+```
+
+#Чтение данных
+
+```{r}
+
+AI_Tcells <- read_csv("../raw_data
+/AI_Tcells_для ЕА - Sheet1.csv")
+
+glimpse(AI_Tcells)
+
+sum(is.na(AI_Tcells$Abs_Value))
+
+```
+
+#Редактирование данных
+
+```{r}
+AI_Tcells_data <- AI_Tcells %>%
+  mutate(Analysis_day = str_extract(Names, "^[^_]+")) %>% # Извлекаем часть до первого "_" 
+  mutate(Сell_population = str_extract(Names, "(?<=\\/).*")) %>% # Извлекаем все после "/"
+  select(ID, Analysis_day, Сell_population, everything()) %>% # Перемещаем извлеченные данные в начало
+  separate_rows(Analysis_day, sep = ",") %>% # Создаем новые строки, если несколько значений разделены запятыми
+  mutate(Analysis_day = str_trim(Analysis_day))
+
+
+AI_Tcells_data <- AI_Tcells_data %>%
+  mutate(cGVHD_present = ifelse(is.na(AI_Tcells_data$cGVHD_time), 0, 1))
+
+AI_Tcells_data <- AI_Tcells_data %>%
+  mutate(cGVHD_present = factor(cGVHD_present, levels = c(0, 1), labels = c("No", "Yes")))
+
+AI_Tcells_data <- AI_Tcells_data %>%
+  mutate(across(c(Analysis_day, Сell_population), ~ factor(.)))
+
+glimpse(AI_Tcells_data)
+```
+
+```{r}
+
+AI_Tcells_filtered <- AI_Tcells_data %>%
+  mutate(
+    Analysis_time = ifelse(
+      str_detect(Analysis_day, "^ДЕНЬ\\sХРРТПХ\\s\\+180$"), cGVHD_time + 180,
+      ifelse(
+        str_detect(Analysis_day, "^ДЕНЬ\\sХРРТПХ\\s\\+90$"), cGVHD_time + 90,
+        ifelse(
+          str_detect(Analysis_day, "^ДЕНЬ\\sХРРТПХ\\s\\+60$"), cGVHD_time + 60,
+          ifelse(
+            str_detect(Analysis_day, "^ДЕНЬ\\sХРРТПХ\\s\\+30$"), cGVHD_time + 30,
+            ifelse(
+              str_detect(Analysis_day, "^ДЕНЬ\\sХРРТПХ$"), cGVHD_time,
+              ifelse(
+                str_detect(Analysis_day, "^\\+180$"), 180,
+                ifelse(
+                  str_detect(Analysis_day, "^\\+90$"), 90,
+                  ifelse(
+                    str_detect(Analysis_day, "^\\+60$"), 60,
+                    ifelse(
+                      str_detect(Analysis_day, "^\\+30$"), 30,
+                      ifelse(
+                        str_detect(Analysis_day, "^\\+365$"), 365, NA_real_
+                      )))))))))))
+
+ AI_Tcells_filtered <- AI_Tcells_filtered  %>%
+  filter(Analysis_day != "+30" & Analysis_day != "+60")
+ 
+  AI_Tcells_filtered <- AI_Tcells_filtered %>%
+  filter(!(Analysis_time == 180 & !is.na(cGVHD_time) & cGVHD_time < 180))
+                   
+AI_Tcells_filtered <- AI_Tcells_filtered %>%
+  select(ID, Time_OS, cGVHD_present, cGVHD_time, Analysis_day, Analysis_time, Сell_population, Abs_Value)
+
+AI_Tcells_filtered <- AI_Tcells_filtered %>%
+  arrange(ID, Analysis_time)
+
+AI_Tcells_filtered <- AI_Tcells_filtered %>%
+  mutate(across(c(Time_OS, cGVHD_time, Analysis_time), ~ factor(.)))
+
+glimpse(AI_Tcells_filtered)
+
+```
+
+#Описательные статистики
+
+```{r}
+
+statistics <- list(
+  
+	      `_Количество субъектов` = ~length(.x) %>% as.character(),
+	      `_Количество (есть данные)` = ~sum(!is.na(.x)) %>% as.character(),
+	      `_Нет данных` = ~sum(is.na(.x)) %>% as.character(),
+	      `_Ср. знач.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", mean(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+	      `_Станд. отклон.` = ~ifelse(sum(!is.na(.x)) < 3, "Н/П*", sd(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+	      `_95% ДИ для среднего` = ~{
+    n <- sum(!is.na(.x))
+    ifelse(n < 3, "Н/П*", 
+           paste0(round(mean(.x, na.rm = TRUE) - 1.96 * sd(.x, na.rm = TRUE) / sqrt(n), 2), " - ", round(mean(.x, na.rm = TRUE) + 1.96 * sd(.x, na.rm = TRUE) / sqrt(n), 2))
+    )
+  },
+	      `_мин. - макс.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(min(.x, na.rm = TRUE) %>% round(2), " - ", max(.x, na.rm = TRUE) %>% round(2))),
+	      `_Медиана` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", median(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+	      `_Q1 - Q3` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(quantile(.x, 0.25, na.rm = TRUE) %>% round(2), " - ", quantile(.x, 0.75, na.rm = TRUE) %>% round(2)))
+	)
+
+
+
+
+AI_Tcells_filtered %>%
+  select(`Analysis_day`, `Сell_population`, `cGVHD_present`, Abs_Value) %>%
+  group_by(`Analysis_day`, `Сell_population`, `cGVHD_present`) %>%
+  summarize(across(Abs_Value, statistics)) %>% # Применяем список statistics к Abs_Value
+  pivot_longer(cols = -c(`Analysis_day`, `Сell_population`, `cGVHD_present`)) %>%
+  separate(name, into = c("Variable", "Statistics"), sep = "__") %>%
+  pivot_wider(names_from = c(cGVHD_present, Statistics), values_from = value) %>%
+  arrange(Analysis_day, Сell_population) %>%
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center", part = "all") %>%
+  merge_v(c("Analysis_day", "Сell_population"))
+
+
+```
+
+В таблице столбцы No- для тех, у кого не развилось cGVHD, Yes - у кого развилось
+
+#Графики без логарифмирования
+
+```{r}
+# 1. Добавление группирующей переменной 
+AI_Tcells_filtered <- AI_Tcells_filtered %>%
+  mutate(group = paste0("Group ", (as.numeric(Сell_population) -1) %/% 5 +1))
+
+# 2. Построение графиков с использованием facet_wrap 
+
+analysis_days <- unique(AI_Tcells_filtered$Analysis_day)
+groups <- unique(AI_Tcells_filtered$group)
+
+# Функция для создания одного графика
+create_plot <- function(day, grp, data) {
+  data_subset <- data %>%
+    filter(Analysis_day == day, group == grp)
+
+  if (nrow(data_subset) > 0) {
+    max_val <- max(data_subset$Abs_Value, na.rm = TRUE)
+
+    p <- ggplot(data_subset, aes(x = cGVHD_present, y = Abs_Value, fill = cGVHD_present)) +
+      geom_boxplot() +
+      ggpubr::stat_compare_means(method = "t.test", label.y = max_val - 0.1 * max_val) +
+      labs(title = paste("Abs_Value by cGVHD_present\n(Analysis_day =", day, ", Group =", grp, ")"),
+           x = "cGVHD_present", y = "Abs_Value") +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1),
+            plot.title = element_text(hjust = 0.5)) +
+      facet_wrap(~Сell_population, scales = "free_x")
+    return(p)
+  } else {
+    return(NULL) # Возвращаем NULL, если нет данных для данного дня и группы
+  }
+}
+
+
+# Создание всех графиков
+plots <- list()
+for (day in analysis_days) {
+  for (grp in groups) {
+    p <- create_plot(day, grp, AI_Tcells_filtered)
+    if (!is.null(p)) {
+      plots[[paste0("plot_", day, "_group_", grp)]] <- p
+      print(p)
+      #ggsave(paste0("plot_", day, "_group_", grp, ".png"), plot = p, width = 12, height = 8)
+    }
+  }
+}
+```
+
+
+# Графики с логарифмированием
+
+ggpubr::stat_compare_means()
+
+```{r}
+
+
+# 1. Добавление группирующей переменной для facet_wrap)
+AI_Tcells_filtered <- AI_Tcells_filtered %>%
+  mutate(group = paste0("Group ", (as.numeric(Сell_population) -1) %/% 5 +1))
+
+
+# 2. Построение графиков с использованием facet_wrap
+
+analysis_days <- unique(AI_Tcells_filtered$Analysis_day)
+groups <- unique(AI_Tcells_filtered$group)
+
+for (day in analysis_days) {
+  for (grp in groups) {
+    data_subset <- AI_Tcells_filtered %>%
+      filter(Analysis_day == day, group == grp)
+
+    if (nrow(data_subset) > 0) {
+      # Логарифмирование значений Abs_Value
+      data_subset <- data_subset %>%
+        mutate(log_Abs_Value = log1p(Abs_Value)) # log1p для обработки нулей
+
+       max_val <- max(data_subset$log_Abs_Value, na.rm = TRUE)
+
+      p <- ggplot(data_subset, aes(x = cGVHD_present, y = log_Abs_Value, fill = cGVHD_present)) + 
+        geom_boxplot() +
+        ggpubr::stat_compare_means(method = "t.test", label.y = max_val - 0.1 * max_val) +
+        labs(title = paste("log(Abs_Value + 1) by cGVHD_present\n(Analysis_day =", day, ", Group =", grp, ")"), 
+             x = "cGVHD_present", y = "log(Abs_Value + 1)") + 
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              plot.title = element_text(hjust = 0.5)) +
+        facet_wrap(~Сell_population, scales = "free_x")
+
+      print(p)
+      #ggsave(paste0("plot_log_", day, "_group_", grp, ".png"), plot = p, width = 12, height = 8)
+    }
+  }
+}
+
+```
+
+
+#GLM wide data
+
+##Подготовка данных
+```{r}
+
+data_day90 <- select(filter(AI_Tcells_filtered, Analysis_day == "+90"), -group)
+
+data_day180 <- select(filter(AI_Tcells_filtered, Analysis_day == "+180"), -group)
+
+
+```
+
+```{r}
+data_wide_90 <- data_day90 %>%
+  pivot_wider(names_from = Сell_population, values_from = Abs_Value)
+
+data_90 <- data_wide_90 %>%
+  select(-ID, -Time_OS, -cGVHD_time, -Analysis_day, -Analysis_time)
+
+
+data_wide_180 <- data_day180 %>%
+  pivot_wider(names_from = Сell_population, values_from = Abs_Value)
+
+data_180 <- data_wide_180 %>%
+  select(-ID, -Time_OS, -cGVHD_time, -Analysis_day, -Analysis_time)
+```
+
+## Первая модель, aliased coefficients
+
+```{r}
+
+model_90 <- glm(cGVHD_present ~ ., data = data_90, family = binomial)
+
+# Модель для 180-го дня
+model_180 <- glm(cGVHD_present ~ ., data = data_180, family = binomial)
+
+summary(model_90)
+summary(model_180)
+
+```
+
+## Диагностика
+
+```{r}
+car::vif(model_90)
+car::vif(model_180)
+```
+#Корреляции
+```{r}
+
+data_90_num <- data_90 %>%
+  select(-cGVHD_present) 
+
+data_90_cor <- cor(data_90_num)
+
+corrplot(data_90_cor, method = "circle", type = "upper", tl.col = "black", tl.cex = 0.7)
+
+corrplot(data_90_cor, method = 'number')
+
+```
+
+```{r}
+correlation_matrix <- cor(model.matrix(model_90))
+
+# Визуализация тепловой карты
+library(ggplot2)
+
+melted_cor <- reshape2::melt(correlation_matrix)
+
+ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +  
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  labs(title = "Матрица корреляций", fill = "Коэффициент корреляции")
+```
+
+```{r}
+correlation_matrix <- cor(model.matrix(model_180))
+
+# Визуализация тепловой карты
+
+melted_cor <- reshape2::melt(correlation_matrix)
+
+ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +  
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  labs(title = "Матрица корреляций", fill = "Коэффициент корреляции")
+```
+
+#LASSO 
+применяет L1-регуляризацию, которая добавляет штрафной член к функции потерь. Этот штраф уменьшает коэффициенты некоторых предикторов до нуля, эффективно исключая их из модели.
+
+##90
+```{r}
+
+# Подготовка данных: X - матрица предикторов, y - вектор отклика
+X <- model.matrix(cGVHD_present ~ ., data = data_90)
+y <- data_90$cGVHD_present
+
+# Построение модели LASSO
+lasso_model <- glmnet(X, y, family = "binomial", alpha = 1) # alpha = 1 для LASSO
+
+# Выбор наилучшего lambda с помощью кросс-валидации
+cv_lasso <- cv.glmnet(X, y, family = "binomial", alpha = 1)
+best_lambda <- cv_lasso$lambda.min
+
+# Модель с наилучшим lambda
+lasso_model_best <- glmnet(X, y, family = "binomial", alpha = 1, lambda = best_lambda)
+
+# Коэффициенты
+coef(lasso_model_best)
+
+```
+
+##180
+```{r}
+
+# Подготовка данных: X - матрица предикторов, y - вектор отклика
+X <- model.matrix(cGVHD_present ~ ., data = data_180)
+y <- data_180$cGVHD_present
+
+# Построение модели LASSO
+lasso_model <- glmnet(X, y, family = "binomial", alpha = 1) # alpha = 1 для LASSO
+
+# Выбор наилучшего lambda с помощью кросс-валидации
+cv_lasso <- cv.glmnet(X, y, family = "binomial", alpha = 1)
+best_lambda <- cv_lasso$lambda.min
+
+# Модель с наилучшим lambda
+lasso_model_best <- glmnet(X, y, family = "binomial", alpha = 1, lambda = best_lambda)
+
+# Коэффициенты
+coef(lasso_model_best)
+
+```
+##несколько попыток отобрать предикторы в модель, везде aliased coefficient
+
+```{r}
+
+model_90_filter <- glm(cGVHD_present ~ . - `4+ (IM STAT)` - `4+` - `4NV(СТАР2)` - `4NV` - `4ЕМ` - `4СМ(СТАР2)` - `4СМ` - `4ТREG(СТАР2)` - `4ТREG` - `4ТЕ(СТАР2)` - `4ТЕ` - `8+ (IM STAT)` - `8+` - `8EMTM` - `8NV(СТАР2)` - `8NV` - `8СМ(СТАР2)` - `8СМ` - `8ТЕ(СТАР2)` - `8ТЕ`, data = data_90, family = binomial)
+
+
+summary(model_90_filter)
+
+```
+
+
+```{r}
+
+model_90_filter_2 <- glm(cGVHD_present ~ `4+ (IM STAT)` + `4NV(СТАР2)` + `4NV` + `4NV_TH17` + `4NV_Th17TO1` + `4NV_TH2` + `4NV+226+` + `4NV+PD-1-TIGIT-` + `4NV+TIGIT+` + `4ЕМ_TH1` + `4ЕМ_TH17` + `4ЕМ_Th17TO1` + `4СМ` + `4СМ_TH22` + `4ТЕ+PD-1+TIGIT-` + `8+ (IM STAT)` + `8+` + `8+DR+` + `8+PD-1+` + `8+PD-1+TIGIT+` + `8+TIGIT+` + `8EMTM` + `8EMTM+226+` + `8EMTM+39+` + `8EMTM+DR+` + `8EMTM+PD-1+` +  `8EMTM+PD-1+TIGIT-` + `8EMTM+PD-1+TIGIT+` + `8EMTM+PD-1-TIGIT+` + `8EMTM+TIGIT+` + `8NV` + `8TREG` + `8ТЕ(СТАР2)` + `8ТЕ+226+` + `8ТЕ+DR+` + `8ТЕ+PD-1+` + `8ТЕ+PD-1+TIGIT+` + `8ТМ`, data = data_90, family = binomial)                          
+                
+
+                         
+```
+
+```{r}
+
+model_90_filter_2 <- glm(cGVHD_present ~ `4NV_TH17` + `4NV_TH2` + `4NV+226+` + `4NV+PD-1-TIGIT-` + `4ЕМ_TH17` + `4ЕМ_Th17TO1` + `8+DR+` + `8+PD-1+` + `8+PD-1+TIGIT+` + `8EMTM+39+` + `8EMTM+DR+` + `8EMTM+PD-1+` +  `8EMTM+PD-1+TIGIT-` + `8EMTM+TIGIT+` + `8NV` + `8TREG` + `8ТЕ+DR+` +   `8ТЕ+PD-1+TIGIT+`, data = data_90, family = binomial) 
+
+summary(model_90_filter_2)
+
+```
+
+#Heat map
+
+```{r}
+
+# Создание корреляционной матрицы
+correlation_matrix <- cor(data_90_num, method = "spearman")
+
+# Иерархическая кластеризация
+cor_hclust <- hclust(dist(1-correlation_matrix), method = "complete")
+
+# Создание тепловой карты 
+pheatmap(
+  correlation_matrix,
+  cluster_rows = cor_hclust,
+  cluster_cols = cor_hclust,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица числовых переменных",
+  annotation_col = NULL,
+  annotation_row = NULL,
+  fontsize = 10
+)
+```
+
+##кластеры
+
+```{r}
+
+# Функция для расчета SSE
+wss <- function(k) {
+  km <- kmeans(data_90_num, centers = k, nstart = 25)
+  return(km$tot.withinss)
+}
+
+# Расчет SSE для k от 1 до 10
+k.values <- 1:10
+SSE <- sapply(k.values, wss)
+
+# Построение графика
+plot(k.values, SSE, type = "b", xlab = "Число кластеров", ylab = "Сумма квадратов ошибок (SSE)", 
+     main = "Метод локтя")
+lines(k.values, SSE, col = "red")
+```
+```{r}
+library(cluster)
+
+silhouette_scores <- sapply(2:10, function(k) {
+  km <- kmeans(data_90_num, centers = k, nstart = 25)
+  sil <- silhouette(km$cluster, dist(data_90_num))
+  mean(sil[, 3])
+})
+
+# Построение графика
+plot(2:10, silhouette_scores, type = "b", xlab = "Число кластеров", ylab = "Средний силуэтный коэффициент", 
+     main = "Критерий силуэта")
+lines(2:10, silhouette_scores, col = "red")
+```
+
+#Деление на 10 кластеров + отдельные матрицы
+
+```{r}
+clusters <- cutree(cor_hclust, k = 10)
+
+table(clusters)
+```
+
+```{r}
+cluster_1_vars <- names(which(clusters == 1))
+cluster_2_vars <- names(which(clusters == 2))
+cluster_3_vars <- names(which(clusters == 3))
+cluster_4_vars <- names(which(clusters == 4))
+cluster_5_vars <- names(which(clusters == 5))
+cluster_6_vars <- names(which(clusters == 6))
+cluster_7_vars <- names(which(clusters == 7))
+cluster_8_vars <- names(which(clusters == 8))
+cluster_9_vars <- names(which(clusters == 9))
+cluster_10_vars <- names(which(clusters == 10))
+```
+
+```{r}
+cluster_1_matrix <- correlation_matrix[cluster_1_vars, cluster_1_vars]
+
+pheatmap(
+  cluster_1_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для первого кластера"
+)
+```
+
+```{r}
+cluster_2_matrix <- correlation_matrix[cluster_2_vars, cluster_2_vars]
+
+pheatmap(
+  cluster_2_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для второго кластера"
+)
+```
+
+```{r}
+cluster_3_matrix <- correlation_matrix[cluster_3_vars, cluster_3_vars]
+
+pheatmap(
+  cluster_3_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для третьего кластера"
+)
+```
+
+```{r}
+cluster_4_matrix <- correlation_matrix[cluster_4_vars, cluster_4_vars]
+
+pheatmap(
+  cluster_4_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для четвертого кластера"
+)
+```
+
+```{r}
+cluster_5_matrix <- correlation_matrix[cluster_5_vars, cluster_5_vars]
+
+pheatmap(
+  cluster_5_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для пятого кластера"
+)
+```
+
+```{r}
+cluster_6_matrix <- correlation_matrix[cluster_6_vars, cluster_6_vars]
+
+pheatmap(
+  cluster_6_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для шестого кластера"
+)
+```
+
+```{r}
+cluster_7_matrix <- correlation_matrix[cluster_7_vars, cluster_7_vars]
+
+pheatmap(
+  cluster_7_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для седьмого кластера"
+)
+```
+
+```{r}
+cluster_8_matrix <- correlation_matrix[cluster_8_vars, cluster_8_vars]
+
+pheatmap(
+  cluster_8_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для восьмого кластера"
+)
+```
+
+
+```{r}
+cluster_9_matrix <- correlation_matrix[cluster_9_vars, cluster_9_vars]
+
+pheatmap(
+  cluster_9_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для девятого кластера"
+)
+```
+
+```{r}
+cluster_10_matrix <- correlation_matrix[cluster_10_vars, cluster_10_vars]
+
+pheatmap(
+  cluster_10_matrix,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для десятого кластера"
+)
+```
+
+#Деление на 5 кластеров + корреляционные матрицы
+
+```{r}
+clusters_2 <- cutree(cor_hclust, k = 5)
+
+table(clusters_2)
+```
+
+```{r}
+
+cluster_1 <- names(which(clusters_2 == 1))
+cluster_2 <- names(which(clusters_2 == 2))
+cluster_3 <- names(which(clusters_2 == 3))
+cluster_4 <- names(which(clusters_2 == 4))
+cluster_5 <- names(which(clusters_2 == 5))
+
+```
+
+```{r}
+cluster_matrix_1 <- correlation_matrix[cluster_1, cluster_1]
+
+pheatmap(
+  cluster_matrix_1,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для первого кластера"
+)
+```
+
+```{r}
+cluster_matrix_2 <- correlation_matrix[cluster_2, cluster_2]
+
+pheatmap(
+  cluster_matrix_2,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для второго кластера"
+)
+```
+
+```{r}
+cluster_matrix_3 <- correlation_matrix[cluster_3, cluster_3]
+
+pheatmap(
+  cluster_matrix_3,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для третьего кластера"
+)
+```
+
+```{r}
+cluster_matrix_4 <- correlation_matrix[cluster_4, cluster_4]
+
+pheatmap(
+  cluster_matrix_4,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для четвертого кластера"
+)
+```
+
+```{r}
+cluster_matrix_5 <- correlation_matrix[cluster_5, cluster_5]
+
+pheatmap(
+  cluster_matrix_5,
+  cluster_rows = F,
+  cluster_cols = F,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  main = "Корреляционная матрица для пятого кластера"
+)
+```
+
+# Модель по результатам heat map, 90 день
+
+```{r}
+
+model_90_filter_finish <- glm(cGVHD_present ~ `4СМ_TH1` + `4_TH22`+ `TREG+PD-1+` + `4ЕМ_TH17` + `4ЕМ+39+` + `4ТREG_TH1` + `8ТЕ` + `4NV_TH2` + `TREG+226-TIGIT-` + `8NV+DR+` + `4NV+PD-1+TIGIT-` + `8EMTM+39+` + `8СМ+TIGIT+`, data = data_90, family = binomial) 
+
+
+summary(model_90_filter_finish)
+
+```
+##Корреляции в model_90_filter_finish
+
+```{r}
+
+data_90_num_model <- data_90 %>%
+  select(`4СМ_TH1`, `4_TH22`,`TREG+PD-1+`, `4ЕМ_TH17`, `4ЕМ+39+`, `4ТREG_TH1`, `8ТЕ`, `4NV_TH2`, `TREG+226-TIGIT-`, `8NV+DR+`, `4NV+PD-1+TIGIT-`, `8EMTM+39+`, `8СМ+TIGIT+`) 
+
+
+data_90_num_model_cor <- cor(data_90_num_model)
+
+corrplot(data_90_num_model_cor, method = "circle", type = "upper", tl.col = "black", tl.cex = 0.7)
+
+corrplot(data_90_num_model_cor, method = 'number')
+
+```
+
+##Диагностика model_90_filter_finish 90 день
+
+**Проверка формы зависимости логита от $X$ на линейность**:
+
+- Проще всего это сделать, построив график для эмпирического `logit` vs $X$ и визуально оценить возможную нелинейность по $X$:
+
+```{r}
+df_check <- model_90_filter_finish %>% broom::augment() %>% 
+  dplyr::select(-starts_with("."), .fitted) %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  pivot_longer(-.fitted) %>% 
+  rename(logit = .fitted)
+  
+ggplot() +
+  geom_point(aes(x = value, y = logit), df_check) +
+  geom_smooth(aes(x = value, y = logit), df_check, color = "red", se = FALSE) +
+  facet_wrap(~ name, scales = "free") +
+  theme_bw()
+```
+
+**Мультиколлинеарность**:
+
+```{r}
+car::vif(model_90_filter_finish)
+
+```
+
+**Выбросы**
+```{r, fig.width=8, fig.height=4}
+
+resid_panel(model_90_filter_finish, plots = c("lev", "cookd"))
+```
+
+# Модель по результатам heat map, 180 день
+
+```{r}
+
+model_180_filter_finish <- glm(cGVHD_present ~ `4СМ_TH1` + `4_TH22`+ `TREG+PD-1+` + `4ЕМ_TH17` + `4ЕМ+39+` + `4ТREG_TH1` + `8ТЕ` + `4NV_TH2` + `4NV_Th17TO1` + `8NV+DR+` + `4NV+PD-1+TIGIT-` + `8EMTM+39+` + `8СМ+TIGIT+`, data = data_180, family = binomial) 
+
+
+summary(model_180_filter_finish)
+```
+
+```{r}
+df_check <- model_180_filter_finish %>% broom::augment() %>% 
+  dplyr::select(-starts_with("."), .fitted) %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  pivot_longer(-.fitted) %>% 
+  rename(logit = .fitted)
+  
+ggplot() +
+  geom_point(aes(x = value, y = logit), df_check) +
+  geom_smooth(aes(x = value, y = logit), df_check, color = "red", se = FALSE) +
+  facet_wrap(~ name, scales = "free") +
+  theme_bw()
+```
+
+
+
+
+
+
+
+
