@@ -1,0 +1,853 @@
+---
+title: "Study of the predictive ability of immunological status and clustering features on the development of chronic graft-versus-host disease after allogeneic hematopoietic stem cell transplantation."
+author: "Elena Marochkina"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
+```
+
+```{r libraries}
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(flextable)
+library(officer)
+library(tibble)
+library(ggplot2)
+library(reshape2)
+library(pheatmap)
+library(caret)
+library(corrplot)
+library(randomForestSRC)
+library(survival)
+library(Boruta)
+```
+
+# 1. Read and Clean Data
+
+``` {r clean data}
+# Read data and rename columns
+df <- read.csv("../../raw_data/AI_Tcells_для ЕА - Sheet1.csv")
+
+# Check duplicates
+duplicates <- df %>%
+  group_by(ID, Time_OS, cGVHD_time, Names) %>%
+  filter(n() > 1) %>%
+  ungroup()  
+
+# Clean the data 
+df_clean <- df %>%
+  mutate(
+    Abs_Value = as.numeric(str_replace_all(Abs_Value, ",", ".")),
+    Abs_Value = as.numeric(Abs_Value)) %>%
+  # Rename columns
+  rename(
+    Subject_ID = ID,
+    Observation_Days_Count = Time_OS,
+    cGVHD_Diagnosis_Day = cGVHD_time,
+    Cell_Count = Abs_Value
+  ) %>%
+  mutate(
+    # Add flag to indicate which patients experienced cGVHD
+    cGVHD_flag = as.numeric(ifelse(!is.na(cGVHD_Diagnosis_Day), 1, 0)),
+    Subject_ID = as.factor(Subject_ID),
+    
+    # Add blood test group 
+    Blood_test_day = case_when(
+      grepl('ДЕНЬ ХРРТПХ_ПЕР.КРОВЬ', df$Names) ~ "cGVHD",
+      grepl('ДЕНЬ ХРРТПХ +', df$Names) ~ paste0(str_extract(df$Names, "(?<=\\+)\\d+(?=_)"), "_cGVHD"),
+      TRUE ~ str_extract(df$Names, "(?<=\\+)\\d+(?=_)")
+    ),
+    
+    # Create exact cell name
+    Cell_name = str_extract(Names, "(?<=/).*")
+  ) %>%
+  select(-Names)
+
+unify_cell_name <- function(cell_name, replacements) {
+  cell_name_unified <- cell_name
+  for (replacement in replacements) {
+    old_value <- replacement[1]
+    new_value <- replacement[2]
+    
+    old_value <- str_replace_all(old_value, "([\\+\\*\\?\\|\\(\\)\\[\\]\\{\\}\\^\\$\\.])", "\\\\\\1")
+    cell_name_unified <- str_replace_all(cell_name_unified, old_value, new_value)
+  }
+  return(cell_name_unified)
+}
+
+replacements <- list(
+  c("PD1", "PD-1"),
+  c("СТАР2", "STAR2"),
+  c("4", "CD4_"),
+  c("CD4_+", "CD4+_"),
+  c("8", "CD8_"),
+  c("CD8_+", "CD8+_"),
+  c("Th", "TH"),
+  c("__", "_"),
+  c("_ ", "_")
+)
+
+# Apply the function to dataframe
+df_clean <- df_clean %>%
+  mutate(
+    Cell_name_unified = Cell_name,
+    Cell_name_unified = unify_cell_name(Cell_name, replacements)
+    )
+
+# Check for duplicates for control 
+duplicates <- df_clean %>%
+  group_by(Subject_ID, Observation_Days_Count, cGVHD_Diagnosis_Day, cGVHD_flag, Blood_test_day, Cell_name) %>%
+  filter(n() > 1) %>%
+  ungroup() 
+
+# Check the unique cells name 
+unique_cells_name <- unique(df_clean$Cell_name_unified)
+print(unique_cells_name)
+
+rm(duplicates, replacements, unify_cell_name)
+```
+
+**Crucial steps:**
+
+1. cGVHD Flag: Adds a flag (cGVHD_flag) to indicate if a patient experienced chronic GVHD (1 if cGVHD_Diagnosis_Day is not NA, otherwise 0).
+2. Blood Test Timing: classifies the blood test timing into groups (e.g., cGVHD, +30_cGVHD).
+3. Cell Name Parsing: Extracts the exact immune cell name from the Names column.
+4. Defines a function unify_cell_name to standardize cell names using a list of replacements (e.g., PD1 -> PD-1, 4 -> CD4_).
+
+## 1.1. Rearrange Data
+
+```{r rearrange data}
+
+# Check the number of unique days
+unique_days <- unique(df_clean$Blood_test_day)
+print(unique_days)
+
+# Transform the dataframe
+df_transformed <- df_clean %>%
+  group_by(Subject_ID, Blood_test_day) %>%
+  pivot_wider(
+    id_cols = c(Subject_ID, Observation_Days_Count, cGVHD_Diagnosis_Day, cGVHD_flag, Blood_test_day),
+    names_from = Cell_name_unified,
+    values_from = Cell_Count,
+    values_fill = list(Cell_Count = NA)
+  ) %>%
+  ungroup()
+
+# Check if in any cell contain more than 1 number
+multi_value_cells <- apply(df_transformed, 2, function(column) {
+  any(grepl(",", column, fixed = TRUE) | grepl(" ", column))
+})
+
+contains_multiple_values <- ifelse(any(multi_value_cells), "Yes", "No")
+print(contains_multiple_values)
+
+rm(unique_days, contains_multiple_values)
+```
+**Crucial steps:**
+
+1. Reshape the data, creating separate columns for each combination of Cell_name_unified and Blood_test_day. Missing values are filled with NA.
+2. Checks if any transformed cell contains multiple values 
+3. Randomly selects a patient and compares their raw Cell_Count data.
+
+# 2. Prediction of cGVHD outcome
+## 2.1. Define DataSet
+
+Survival Analysis are planned. 
+
+*Event:* Diagnosis of cGVHD (cGVHD_flag == 1).
+
+*Survival Time:*
+
+- For patients with cGVHD: cGVHD_Diagnosis_Day as the survival time.
+- For patients without cGVHD: Observation_Days_Count as the censored survival time.
+
+*Perform PCA to reduce 167 variables into fewer components that explain the maximum variance!*
+
+``` {r define dataset Prediction of cGVHD outcome}
+
+# Select days of interest
+df_cGVHD_prediction <- df_transformed %>%
+  filter(Blood_test_day %in% c("90", "180", "365", "cGVHD")) 
+
+# # Apply log transformation to numeric columns
+# df_cGVHD_prediction <- df_cGVHD_prediction %>%
+#  mutate(
+#     Observation_Days_Count = factor(Observation_Days_Count),
+#     cGVHD_Diagnosis_Day = factor(cGVHD_Diagnosis_Day)
+#   ) %>%
+#   mutate(across(
+#     where(is.numeric), 
+#     ~ log10(. + 1), 
+#     .names = "{col}"
+#   )) %>%
+#   mutate(
+#     Observation_Days_Count = as.numeric(Observation_Days_Count),
+#     cGVHD_Diagnosis_Day = as.numeric(cGVHD_Diagnosis_Day)
+#   )
+```
+
+## 2.2. Check for Missing Data
+
+```{r check for missing data}
+# Calculate missing values by Blood_test_day
+missing_summary <- df_cGVHD_prediction %>%
+  group_by(Blood_test_day) %>%
+  summarise(across(everything(), ~ mean(is.na(.)) * 100)) %>%
+  pivot_longer(cols = -Blood_test_day, names_to = "Column", values_to = "Missing_Percentage")
+```
+
+**Crucial steps:**
+
+1. No missing values by Blood test day were identified for any cell name.
+
+## 2.3. Visualisation
+### 2.3.1. Correlation martrix
+
+```{r correlation matrix}
+# Select relevant numeric columns 
+correlation_data <- df_cGVHD_prediction %>%
+  filter(Blood_test_day %in% c("90")) %>%
+  filter(cGVHD_Diagnosis_Day > 90 | is.na(cGVHD_Diagnosis_Day)) %>%
+  select(where(is.numeric))
+
+cor_matrix <- cor(correlation_data, use = "complete.obs")
+
+# Mask weak correlations
+cor_matrix[abs(cor_matrix) < 0.5] <- NA
+
+# Plot strong correlations
+corrplot(cor_matrix, 
+         method = "color", 
+         type = "lower", 
+         tl.col = "black", 
+         tl.srt = 45, 
+         number.cex = 0.1, 
+         addCoef.col = "black", 
+         mar = c(2, 2, 2, 2),
+         cl.cex = 0.5,        
+         tl.cex = 0.15)
+
+correlation_table <- as.data.frame(as.table(cor_matrix))
+
+colnames(correlation_table) <- c("Variable1", "Variable2", "Correlation")
+
+# Filter for correlations >= 0.9
+filtered_table <- correlation_table %>%
+  filter(Correlation >= 0.9 & Variable1 != Variable2)
+
+# Ensure no duplicate pairs
+filtered_table <- filtered_table %>%
+  mutate(
+    Pair = paste0(pmin(Variable1, Variable2), "-", pmax(Variable1, Variable2))) %>%
+  distinct(Pair, .keep_all = TRUE) %>%
+  select(-Pair) %>%
+  arrange(desc(Correlation)) %>%
+  mutate(Num = row_number())
+
+print(filtered_table)
+
+# Check correlations for 'cGVHD_Diagnosis_Day' >= 0.6
+cgvhd_filtered_table <- correlation_table %>%
+  filter(
+    (Variable1 == "cGVHD_Diagnosis_Day") &
+    Correlation > 0.6 & 
+    (Variable1 != Variable2)
+  ) %>%
+  arrange(desc(Correlation)) %>%
+  mutate(Num = row_number())
+
+# Print the filtered table
+print(cgvhd_filtered_table)
+
+```
+
+- In linear regression or logistic regression, multicollinearity makes it difficult to determine the unique contribution of each predictor variable.
+
+Models that are not sensitive to multicollinearity because they split the data hierarchically:
+
+- *Random Forest:* 
+- *XGBoost*
+
+### 2.3.2. Heatmap with clusters
+
+```{r visualisation heatmap with clusters all data}
+
+correlation_data <- df_cGVHD_prediction %>%
+  filter(Blood_test_day %in% c("90")) %>%
+  filter(cGVHD_Diagnosis_Day > 90 | is.na(cGVHD_Diagnosis_Day)) %>%
+  select(where(is.numeric), -cGVHD_Diagnosis_Day)
+
+cor_matrix <- cor(correlation_data, use = "complete.obs")
+
+# Hierarchical clustering and heatmap
+pheatmap(cor_matrix,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         display_numbers = FALSE,
+         fontsize_row = 2,
+         fontsize_col = 2,
+         main = "Clustered Heatmap for Survival Variables",
+         width = 20, 
+        height = 20  )
+
+
+# Perform hierarchical clustering
+distance_matrix <- as.dist(1 - cor_matrix) 
+hclust_result <- hclust(distance_matrix, method = "ward.D2") # Ward's method
+
+# Cut the dendrogram into clusters
+clusters <- cutree(hclust_result, k = 6)
+
+clustered_data <- data.frame(
+  Variable = rownames(cor_matrix),
+  Cluster = clusters
+)
+
+# Dendrogram with clusters
+plot(hclust_result, labels = rownames(cor_matrix), main = "Dendrogram of Clusters", cex = 0.2)
+
+# Add rectangles
+rect.hclust(hclust_result, k = 6, border = 2:6)
+
+```
+
+
+```{r }
+custom_order <- c("90", "180", "365", "cGVHD")
+
+# Convert Blood_test_day to a factor with the custom order
+df_cGVHD_transformed <- df_cGVHD_prediction %>%
+  mutate(Blood_test_day = factor(Blood_test_day, levels = custom_order))
+
+# Arrange data by the specified order of Blood_test_day
+df_cGVHD_transformed <- df_cGVHD_transformed %>%
+  arrange(Blood_test_day)
+
+# Aggregate data by Blood_test_day
+heatmap_data <- df_cGVHD_transformed %>%
+  group_by(Blood_test_day) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  ungroup()
+
+# Convert to matrix for heatmap plotting
+heatmap_matrix <- heatmap_data %>%
+  column_to_rownames("Blood_test_day") %>%
+  as.matrix()
+
+# Create the heatmap
+pheatmap(heatmap_matrix,
+         cluster_rows = FALSE,
+         cluster_cols = TRUE,
+         display_numbers = FALSE,
+         fontsize_row = 6,
+         fontsize_col = 3,
+         main = "Heatmap: Variable Distribution by Blood Test Day")
+
+```
+
+Some variable distributions seem to change over time (Blood Test Day), with certain groups (e.g., those in warmer tones) showing higher activity at specific days, such as 365 (for non-log-transformed data).
+
+
+### 2.3.3. PCA
+
+```{r PCA}
+# Filter and normalize data while preserving cGVHD_flag
+df_normalized <- df_transformed %>%
+  filter(Blood_test_day %in% c("90", "180", "365", "cGVHD")) %>%
+  filter(cGVHD_Diagnosis_Day > 90 | is.na(cGVHD_Diagnosis_Day)) %>%
+  # Ensure cGVHD_flag is retained for later use
+  select(cGVHD_flag, where(is.numeric), -Observation_Days_Count, -cGVHD_Diagnosis_Day) %>%
+  mutate(across(where(is.numeric), ~ (.-mean(.)) / sd(.), .names = "z_{col}"))
+
+# Save cGVHD_flag for later use
+cGVHD_flags <- df_normalized$cGVHD_flag
+
+# Perform near-zero variance filtering (excluding cGVHD_flag)
+nzv <- nearZeroVar(df_normalized %>% select(-cGVHD_flag))
+df_filtered <- df_normalized %>%
+  select(-nzv, cGVHD_flag) %>% # Retain cGVHD_flag after filtering
+  filter(complete.cases(.))
+
+# Perform PCA (exclude cGVHD_flag from PCA computation)
+pca_results <- prcomp(df_filtered %>% select(-cGVHD_flag), scale. = TRUE)
+
+# Attach PCA scores and cGVHD_flag back together
+pca_scores <- as.data.frame(pca_results$x) %>%
+  mutate(cGVHD_flag = cGVHD_flags)
+
+# Explained variance calculations
+explained_variance <- pca_results$sdev^2 / sum(pca_results$sdev^2)
+cumulative_variance <- cumsum(explained_variance)
+
+# Create a data frame for plotting explained variance
+explained_variance_data <- data.frame(
+  PC = 1:length(explained_variance),
+  Explained_Variance = explained_variance,
+  Cumulative_Variance = cumulative_variance
+)
+
+# Filter for components contributing to the first 80% of cumulative variance
+explained_variance_data_filtered <- explained_variance_data %>%
+  filter(Cumulative_Variance <= 0.8)
+
+# Add percentage labels for explained variance
+explained_variance_data_filtered <- explained_variance_data_filtered %>%
+  mutate(Variance_Percentage_Label = paste0(round(Explained_Variance * 100, 2), "%"))
+
+# Plot explained variance with percentage labels
+ggplot(explained_variance_data_filtered, aes(x = PC)) +
+  geom_bar(aes(y = Explained_Variance), stat = "identity", fill = "steelblue") +
+  geom_text(aes(y = Explained_Variance, label = Variance_Percentage_Label), 
+            vjust = -0.5, size = 3.5) +
+  geom_line(aes(y = Cumulative_Variance), color = "red", size = 1) +
+  geom_point(aes(y = Cumulative_Variance), color = "red", size = 2) +
+  scale_y_continuous(
+    name = "Variance Explained",
+    sec.axis = sec_axis(~., name = "Cumulative Variance Explained")
+  ) +
+  labs(
+    title = "Explained Variance by Principal Components (First 80%)",
+    x = "Principal Component"
+  ) +
+  theme_minimal(base_size = 14)
+# Perform clustering on PCA scores
+set.seed(123)
+wss <- sapply(1:10, function(k) {
+  kmeans(pca_scores[, 1:10], centers = k, nstart = 25)$tot.withinss
+})
+
+# Plot Elbow Method
+elbow_plot <- data.frame(Clusters = 1:10, WSS = wss)
+ggplot(elbow_plot, aes(x = Clusters, y = WSS)) +
+  geom_line() +
+  geom_point(size = 3) +
+  labs(
+    title = "Elbow Method for Optimal Clusters",
+    x = "Number of Clusters",
+    y = "Total Within-Cluster Sum of Squares (WSS)"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Apply K-means clustering
+optimal_clusters <- 4
+kmeans_result <- kmeans(pca_scores[, 1:10], centers = optimal_clusters, nstart = 25)
+pca_scores$Cluster <- as.factor(kmeans_result$cluster)
+
+# Visualize clusters with coloring by cGVHD_flag
+ggplot(pca_scores, aes(x = PC1, y = PC2, color = as.factor(cGVHD_flag))) +
+  geom_point(size = 2, alpha = 0.8) +  # Scatterplot of PCA points
+  stat_ellipse(aes(group = Cluster), type = "t", linetype = "dashed", size = 1, color = "black") +  # Ellipses for clusters
+  scale_color_brewer(palette = "Set1") +  # Color palette for cGVHD_flag
+  labs(
+    title = "PCA Clusters with cGVHD_flag Coloring and Cluster Ellipses",
+    x = "PC1 (Principal Component 1)",
+    y = "PC2 (Principal Component 2)",
+    color = "cGVHD_flag"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+
+```
+
+### 2.3.4. BORUTA algorithm
+#### 2.3.4.1.   90 days
+
+```{r Boruta 90 days}
+set.seed(123)
+
+df_boruta_90 <- df_transformed %>%
+  filter(Blood_test_day %in% c("90")) %>%
+  filter(cGVHD_Diagnosis_Day > 90 | is.na(cGVHD_Diagnosis_Day)) %>%
+  select(-Observation_Days_Count, -cGVHD_Diagnosis_Day, -Blood_test_day, -Subject_ID)
+
+# Apply the Boruta algorithm
+boruta_result_90 <- Boruta(cGVHD_flag ~ ., data = df_boruta_90)
+
+# Extract important variables
+important_vars_90 <- getSelectedAttributes(boruta_result_90, withTentative = FALSE)
+
+# Extract tentative variables
+tentative_vars_90 <- getSelectedAttributes(boruta_result_90, withTentative = TRUE)
+only_tentative_90 <- setdiff(tentative_vars_90, important_vars_90)
+
+cat("Confirmed important variables:\n", paste(important_vars_90, collapse = ", "), "\n\n")
+cat("Tentative variables:\n", paste(only_tentative_90, collapse = ", "), "\n")
+
+# keep only important and tentative features
+filtered_importance <- boruta_result_90$ImpHistory[, tentative_vars_90, drop = FALSE]
+
+# Plot filtered results
+plot(filtered_importance, xlab = "", xaxt = "n", main = "Boruta Feature Importance (90 Days - Filtered)")
+lz <- lapply(1:ncol(filtered_importance), function(i) filtered_importance[, i])
+names(lz) <- colnames(filtered_importance)
+axis(side = 1, las = 2, labels = names(lz),
+     at = 1:ncol(filtered_importance), cex.axis = 0.5)
+```
+
+#### 3.3.4.2.   180 days
+
+```{r Boruta 180 days}
+set.seed(123)
+
+df_boruta_180 <- df_transformed %>%
+  filter(Blood_test_day %in% c("180")) %>%
+  filter(cGVHD_Diagnosis_Day > 180 | is.na(cGVHD_Diagnosis_Day)) %>%
+  select(-Observation_Days_Count, -cGVHD_Diagnosis_Day, -Blood_test_day, -Subject_ID)
+
+# Apply the Boruta algorithm
+boruta_result_180 <- Boruta(cGVHD_flag ~ ., data = df_boruta_180)
+
+# Extract important variables
+important_vars_180 <- getSelectedAttributes(boruta_result_180, withTentative = FALSE)
+
+# Extract tentative variables
+tentative_vars_180 <- getSelectedAttributes(boruta_result_180, withTentative = TRUE)
+only_tentative_180 <- setdiff(tentative_vars_180, important_vars_180)
+
+cat("Confirmed important variables:\n", paste(important_vars_180, collapse = ", "), "\n\n")
+cat("Tentative variables:\n", paste(only_tentative_180, collapse = ", "), "\n")
+
+# keep only important and tentative features
+filtered_importance <- boruta_result_180$ImpHistory[, tentative_vars_180, drop = FALSE]
+
+# Plot filtered results
+plot(filtered_importance, xlab = "", xaxt = "n", main = "Boruta Feature Importance (180 Days - Filtered)")
+lz <- lapply(1:ncol(filtered_importance), function(i) filtered_importance[, i])
+names(lz) <- colnames(filtered_importance)
+axis(side = 1, las = 2, labels = names(lz),
+     at = 1:ncol(filtered_importance), cex.axis = 0.5)
+```
+
+### 2.3.5.    Random Forest over Survival
+#### 2.3.5.1    90 days
+
+```{r Random Forest over Survival 90 days}
+df_cGVHD_prediction_survival_90 <- df_cGVHD_prediction %>%
+  filter(Blood_test_day %in% c("90")) %>%
+  filter(cGVHD_Diagnosis_Day > 90 | is.na(cGVHD_Diagnosis_Day)) %>%
+  mutate(
+    cGVHD_Diagnosis_Day = ifelse(is.na(cGVHD_Diagnosis_Day), Observation_Days_Count, cGVHD_Diagnosis_Day),
+    cGVHD_flag = as.numeric(as.character(cGVHD_flag))
+  ) %>%
+  select(-Subject_ID, -Blood_test_day, -Observation_Days_Count)
+
+```
+
+```{r OOB 90 days}
+
+# Function to evaluate OOB Requested performance error for different numbers of trees
+evaluate_trees <- function(data, formula, max_trees = 1000, step = 50) {
+  results <- data.frame(Trees = integer(), OOB_Error = numeric())
+  
+  for (ntree in seq(50, max_trees, by = step)) {
+    set.seed(123)
+    rf_model <- rfsrc(
+      formula = formula,
+      data = data,
+      mtry = round(sqrt(ncol(data) - 2)),
+      nodesize = 15,
+      ntree = ntree,
+      importance = TRUE
+    )
+    
+    # Extract the OOB Requested performance error
+    oob_error <- rf_model$err.rate[length(rf_model$err.rate)]
+    results <- rbind(results, data.frame(
+      Trees = ntree,
+      OOB_Error = oob_error
+    ))
+  }
+  
+  return(results)
+}
+
+# Apply the function to your dataset
+oob_results <- evaluate_trees(
+  data = df_cGVHD_prediction_survival_90,
+  formula = Surv(cGVHD_Diagnosis_Day, cGVHD_flag) ~ .,
+  max_trees = 1000,
+  step = 50
+)
+
+ggplot(oob_results, aes(x = Trees, y = OOB_Error)) +
+  geom_line() +
+  geom_point(size = 2) +
+  labs(
+    title = "OOB Requested Performance Error vs. Number of Trees",
+    x = "Number of Trees",
+    y = "OOB Requested Performance Error"
+  ) +
+  theme_minimal()
+
+# Find the number of trees with the minimum OOB error
+best_trees <- oob_results$Trees[which.min(oob_results$OOB_Error)]
+
+print(paste("Best number of trees:", best_trees))
+```
+
+```{r RFS 90 days}
+# Build the Random Survival Forest model
+RF_obj <- rfsrc(Surv(cGVHD_Diagnosis_Day,cGVHD_flag)~.,
+                df_cGVHD_prediction_survival_90,
+                ntree = best_trees,
+                mtry = round(sqrt(ncol(df_cGVHD_prediction_survival_90) - 2)),
+                nodesize = 15,
+                membership = TRUE,
+                importance=TRUE)
+
+# Print the Random Survival Forest object
+print(RF_obj)
+
+```
+
+The raw CRPS (75.93) and standardized CRPS (0.151) measure how accurate the model's predictions are. Lower values mean better predictions. 
+
+The requested performance error (0.399) is the goal for the model's accuracy. This indicates good performance. 
+
+```{r Survival curve 90 days}
+# Create a hypothetical observation for prediction
+# Creating an hypothetical observation 
+newdata <- data.frame(lapply(1:ncol(RF_obj$xvar),function(i){median(RF_obj$xvar[,i])}))
+colnames(newdata) <- RF_obj$xvar.names
+
+# Predict survival for the hypothetical observation
+y.pred <- predict(RF_obj, newdata = rbind(newdata, RF_obj$xvar)[1, ])
+
+# Plot predicted survival probability over time
+
+plot(
+  round(y.pred$time.interest, 2), 
+  y.pred$survival[1, ], 
+  type = "l", 
+  xlab = "Time (Days)", 
+  ylab = "Survival Probability", 
+  col = 1, 
+  lty = 1, 
+  lwd = 2, 
+  main = "Predicted Survival Curve"
+)
+
+```
+
+```{r Brier score 90 days}
+# Calculate the Brier score using the Kaplan-Meier censoring distribution
+bs.km <- get.brier.survival(RF_obj, cens.mode = "km")$brier.score
+
+# Plot the Brier score
+plot(
+  bs.km, 
+  type = "s", 
+  col = 2, 
+  ylab = "Brier Score", 
+  xlab = "Time (Days)", 
+  main = "Brier Score Over Time"
+)
+
+```
+
+- < 0.1 - excellent
+- <= 0.2 - superior
+- <=0.3 - adequate
+
+```{r VIMP 90 days}
+# Extract VIMP
+vimp <- RF_obj$importance
+
+vimp_df <- data.frame(
+  Variable = names(vimp),
+  VIMP = vimp
+)
+
+# Sort variables by VIMP in descending order
+vimp_df_positive <- vimp_df %>%
+  filter(VIMP > 0) %>%
+  arrange(desc(VIMP)) %>%
+  head(30)
+
+ggplot(vimp_df_positive, aes(x = reorder(Variable, VIMP), y = VIMP)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Variable Importance (VIMP) in RSF",
+    x = "Variables",
+    y = "VIMP"
+  ) +
+  theme_minimal(base_size = 8)
+
+# Filter for variables with negative VIMP
+vimp_negative <- vimp_df %>%
+  filter(VIMP < 0) %>%
+  arrange(VIMP)  # Sort in ascending order
+
+ggplot(vimp_negative, aes(x = reorder(Variable, VIMP), y = VIMP)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(
+    title = "Variables with Negative VIMP in RSF",
+    x = "Variables",
+    y = "VIMP"
+  ) +
+  theme_minimal(base_size = 4)
+
+```
+
+```{r VIMP vs Boruta 90 days}
+# Compare with VIMP
+vimp_boruta_comparison <- vimp_df_positive %>%
+  mutate(
+    Boruta_Status = case_when(
+      Variable %in% important_vars_90 ~ "Confirmed Important",
+      Variable %in% only_tentative_90 ~ "Tentative",
+      TRUE ~ "Rejected"
+    )
+  )
+
+# Plot Comparison
+ggplot(vimp_boruta_comparison, aes(x = reorder(Variable, VIMP), y = VIMP, fill = Boruta_Status)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(
+    title = "VIMP and Boruta Comparison",
+    x = "Variables",
+    y = "VIMP",
+    fill = "Boruta Status"
+  ) +
+  theme_minimal(base_size = 8)
+
+# Print Final Comparison Table
+print(vimp_boruta_comparison)
+
+```
+
+#### 2.3.5.2 180 days
+
+```{r Random Forest over Survival 180 days}
+
+df_cGVHD_prediction_survival_180 <- df_cGVHD_prediction %>%
+  filter(Blood_test_day %in% c("180")) %>%
+  filter(cGVHD_Diagnosis_Day > 180 | is.na(cGVHD_Diagnosis_Day)) %>%
+  mutate(
+    cGVHD_Diagnosis_Day = ifelse(is.na(cGVHD_Diagnosis_Day), Observation_Days_Count, cGVHD_Diagnosis_Day),
+    cGVHD_flag = as.numeric(as.character(cGVHD_flag))
+  ) %>%
+  select(-Observation_Days_Count, -Subject_ID, -Blood_test_day)
+
+```
+
+```{r OOB 180 days}
+
+# Function to evaluate OOB Requested performance error for different numbers of trees
+evaluate_trees <- function(data, formula, max_trees = 1000, step = 10) {
+  results <- data.frame(Trees = integer(), OOB_Error = numeric())
+  
+  for (ntree in seq(10, max_trees, by = step)) {
+    set.seed(123)
+    rf_model <- rfsrc(
+      formula = formula,
+      data = data,
+      mtry = round(sqrt(ncol(data) - 2)),
+      nodesize = 7,
+      ntree = ntree,
+      importance = TRUE
+    )
+    
+    # Extract the OOB Requested performance error
+    oob_error <- rf_model$err.rate[length(rf_model$err.rate)]
+    results <- rbind(results, data.frame(
+      Trees = ntree,
+      OOB_Error = oob_error
+    ))
+  }
+  
+  return(results)
+}
+
+# Apply the function to your dataset
+oob_results <- evaluate_trees(
+  data = df_cGVHD_prediction_survival_180,
+  formula = Surv(cGVHD_Diagnosis_Day, cGVHD_flag) ~ .,
+  max_trees = 1000,
+  step = 10
+)
+
+ggplot(oob_results, aes(x = Trees, y = OOB_Error)) +
+  geom_line() +
+  geom_point(size = 2) +
+  labs(
+    title = "OOB Requested Performance Error vs. Number of Trees",
+    x = "Number of Trees",
+    y = "OOB Requested Performance Error"
+  ) +
+  theme_minimal()
+
+# Find the number of trees with the minimum OOB error
+best_trees <- oob_results$Trees[which.min(oob_results$OOB_Error)]
+
+print(paste("Best number of trees:", best_trees))
+```
+
+```{r RFS 180 days}
+# Build the Random Survival Forest model
+RF_obj <- rfsrc(Surv(cGVHD_Diagnosis_Day,cGVHD_flag)~.,
+               df_cGVHD_prediction_survival_180,
+                ntree = best_trees,
+                mtry = round(sqrt(ncol(df_cGVHD_prediction_survival_180) - 2)),
+                nodesize = 15,
+                membership = TRUE,
+                importance=TRUE)
+
+print(RF_obj)
+
+```
+
+```{r Survival curve 180 days}
+# Create a hypothetical observation for prediction
+newdata <- data.frame(lapply(1:ncol(RF_obj$xvar),function(i){median(RF_obj$xvar[,i])}))
+colnames(newdata) <- RF_obj$xvar.names
+
+# Predict survival for the hypothetical observation
+y.pred <- predict(RF_obj, newdata = rbind(newdata, RF_obj$xvar)[1, ])
+
+# Plot predicted survival probability over time
+plot(
+  round(y.pred$time.interest, 2), 
+  y.pred$survival[1, ], 
+  type = "l", 
+  xlab = "Time (Days)", 
+  ylab = "Survival Probability", 
+  col = 1, 
+  lty = 1, 
+  lwd = 2, 
+  main = "Predicted Survival Curve"
+)
+
+```
+
+```{r Brier score 180 days}
+# Calculate the Brier score using the Kaplan-Meier
+bs.km <- get.brier.survival(RF_obj, cens.mode = "km")$brier.score
+
+plot(
+  bs.km, 
+  type = "s", 
+  col = 2, 
+  ylab = "Brier Score", 
+  xlab = "Time (Days)", 
+  main = "Brier Score Over Time"
+)
+
+```
+
+- < 0.1 - excellent
+- <= 0.2 - superior
+- <= 0.3 - adequate
+
+It was not possible to extract VIMP or compare it with Boruta Results. The Model was not good enough to provide good-quality prediction. 
