@@ -484,12 +484,17 @@ cat("Tentative variables:\n", paste(only_tentative_90, collapse = ", "), "\n")
 # keep only important and tentative features
 filtered_importance <- boruta_result_90$ImpHistory[, tentative_vars_90, drop = FALSE]
 
-# Plot filtered results
-plot(filtered_importance, xlab = "", xaxt = "n", main = "Boruta Feature Importance (90 Days - Filtered)")
-lz <- lapply(1:ncol(filtered_importance), function(i) filtered_importance[, i])
-names(lz) <- colnames(filtered_importance)
-axis(side = 1, las = 2, labels = names(lz),
-     at = 1:ncol(filtered_importance), cex.axis = 0.5)
+# Filter only important and tentative features
+filtered_importance <- boruta_result_90$ImpHistory[, c(important_vars_90, only_tentative_90), drop = FALSE]
+
+# Reshape the data to plot importance scores on the y-axis
+boxplot(filtered_importance, 
+        main = "Boruta Feature Importance (90 Days - Filtered)",
+        ylab = "Importance", 
+        las = 2,  
+        cex.axis = 0.4, 
+        col = "lightblue", 
+        outline = FALSE)
 ```
 
 #### 3.3.4.2.   180 days
@@ -518,12 +523,14 @@ cat("Tentative variables:\n", paste(only_tentative_180, collapse = ", "), "\n")
 # keep only important and tentative features
 filtered_importance <- boruta_result_180$ImpHistory[, tentative_vars_180, drop = FALSE]
 
-# Plot filtered results
-plot(filtered_importance, xlab = "", xaxt = "n", main = "Boruta Feature Importance (180 Days - Filtered)")
-lz <- lapply(1:ncol(filtered_importance), function(i) filtered_importance[, i])
-names(lz) <- colnames(filtered_importance)
-axis(side = 1, las = 2, labels = names(lz),
-     at = 1:ncol(filtered_importance), cex.axis = 0.5)
+# Reshape the data to plot importance scores on the y-axis
+boxplot(filtered_importance, 
+        main = "Boruta Feature Importance (180 Days - Filtered)",
+        ylab = "Importance", 
+        las = 2,
+        cex.axis = 0.4,
+        col = "lightblue", 
+        outline = FALSE)
 ```
 
 ### 2.3.5.    Random Forest over Survival
