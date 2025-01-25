@@ -1,0 +1,1310 @@
+---
+title: "clustering_assessment"
+author: "Dmitrii Belousov"
+date: "2025-01-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      root.dir = "~/GVHD_project/notebooks/EDA/")
+library(tidyverse)
+library(ggplot2)
+library(ggridges)
+library(GGally)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(cluster)
+library(pheatmap)
+library(caret)
+library(survival)
+library(survminer)
+library(NMF)
+library(fpc)
+library(factoextra)
+library(rstatix)
+library(corrplot)
+
+set.seed(42)
+```
+
+# Data Import & Cleansing
+
+```{r}
+data <- read_csv("~/GVHD_project/data/data_wide_preproc.csv")
+data <- data %>% 
+  mutate(Event = ifelse(is.na(cGVHD_time), 0, 1),
+         Time_CFS = ifelse(is.na(cGVHD_time), Time_OS, cGVHD_time))
+
+row.names(data) <- data %>% 
+  mutate(ID_new = paste0(round(runif(231, 0, 1000), 0), Collection_time, ID)) %>% 
+  pull(ID_new)
+```
+
+# Clustering Raw Matrix
+
+## Number of clusters determination
+
+```{r}
+hclust_func <- function(data, k) {
+  data %>% 
+    dist(method = "euclidean") %>% 
+    hclust(method = "ward.D") %>% 
+    cutree(k = k) -> labels
+  
+  return(list(clusters = labels))
+}
+
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, 
+                               Collection_Day, Time_CFS, Event)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+fviz_nbclust(data_subset, FUNcluster = hclust_func, method = "silhouette")
+```
+
+## Clustering
+
+```{r, fig.height=5, fig.width=10}
+
+res <- data_subset %>% 
+  dist(method = "euclidean") %>% 
+  hclust(method = "ward.D", ) 
+
+res %>% 
+  factoextra::fviz_dend(cex = 0.2, 
+            k = 3, 
+            k_colors = "jco")
+```
+
+```{r, fig.height=10, fig.width=25}
+labels <- res %>% 
+  cutree(k = 3)
+
+data_subset_sorted <- data_subset %>% 
+  mutate(labels = labels) %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+
+```
+
+## Assessment
+### Sillhouette
+
+```{r}
+sil <- silhouette(res %>% cutree(k = 3), 
+                  data_subset %>% dist(method = "euclidean"))
+fviz_silhouette(sil) +
+  theme_bw()
+```
+
+### Jaccard Stability
+
+```{r}
+Hclustering <- function(data_matrix, k = 4) {
+  clusters <- data_matrix %>% 
+    dist(method = "euclidean") %>% 
+    hclust(method = "ward.D") %>% 
+    cutree(k = k)
+  
+  if (!is.factor(clusters)) {
+    clusters <- factor(clusters)
+  }
+  
+  levels(clusters) <- as.character(0:k-1)
+
+  clist <- lapply(levels(clusters), function(cluster) {clusters == cluster})
+  names(clist) <- levels(clusters)
+
+  output = list(
+    result = clusters,
+    nc = n_distinct(clusters),
+    clusterlist = clist,
+    partition = rep(1, length(clusters)),
+    clustermethod = "WARD"
+  )
+  
+  return(output)
+}
+```
+
+```{r}
+data_subset_mtx <- as.matrix(data_subset)
+```
+
+```{r}
+cpx <- clusterboot(data_subset_mtx, 
+            B = 100, k = 4,
+            clustermethod = Hclustering, 
+            bootmethod = "boot", 
+            multipleboot = TRUE)
+```
+
+
+```{r}
+print(cpx)
+```
+
+## Survival
+
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7))         
+```
+
+## Cluster characteristics
+
+```{r}
+stats <- list()
+
+colnames(labels) <- c("consensus")
+
+data_subset_cc <- cbind(labels, data_subset) %>% 
+  filter(consensus != 7) %>% 
+  mutate(consensus = as.factor(consensus))
+
+for (i in c(1:n_distinct(data_subset_cc$consensus))) {
+  data_internal <- data_subset_cc %>% 
+    mutate(across(where(is.numeric), scale)) %>% 
+    mutate(test_col = ifelse(consensus == i, i, "other")) %>% 
+    select(everything(), -c(consensus))
+  
+  MD <- data_internal %>% 
+    summarise(across(where(is.numeric), 
+                       ~ t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate1 - 
+                        t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate2))# %>% log2()
+  
+  Ps <- data_internal %>% 
+    summarise(across(where(is.numeric), ~ t_test(.x ~ test_col, data = data_internal, 
+                                               detailed = TRUE)$p))
+  p.adj <- p.adjust(Ps, method = "BH")
+  
+  stats[[paste(i, "vs. all")]] <- as.data.frame(t(rbind(MD, Ps, p.adj)))
+  colnames(stats[[paste(i, "vs. all")]]) <- c("MeanDiff", "P", "Padj")
+}
+```
+
+```{r, fig.width=10, fig.height = 4}
+library(cowplot)
+
+plot_MD <- function(data){
+  d <- data %>% 
+    mutate(label = rownames(data)) %>% 
+    filter(Padj < 0.05) %>% 
+    arrange(desc(abs(MeanDiff))) %>% 
+    slice_head(n = 10) %>% 
+    arrange(desc(MeanDiff)) %>% 
+    mutate(position = seq(10, 1)) 
+  
+  min <- min(d$MeanDiff)
+  max <- max(d$MeanDiff)
+  
+  p <- ggplot(d, aes(x = MeanDiff, y = position)) +          
+      geom_text(aes(label = label),       
+                vjust = -0.5,              
+                hjust = 0,             
+                color = "black") +  
+      xlim(min, max + 0.5) +
+      ylim(.5, 10.5) +
+      theme_bw()
+  
+  return(p)
+}
+
+plot_grid(plotlist = lapply(stats, plot_MD), ncol=3)
+```
+
+
+# Clustering Correlation matrix
+
+```{r}
+collection_time_point_palette <- c(
+  "Never" = "#00AA96", 
+  "Pre" = "#F88F70",
+  "Post" = "#F56376"
+)
+```
+
+## Correlation analysis
+
+```{r, fig.height=10, fig.width=10}
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, Collection_Day, Event, Time_CFS)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  t() %>% 
+  as.data.frame() 
+
+colnames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+annotation_row_vec <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  pull(Collection_time) %>% 
+  as.data.frame()
+
+rownames(annotation_row_vec) <- colnames(data_subset)
+
+corr_data <- data_subset %>% 
+  as.data.frame() %>% 
+  psych::corr.test(method = "spearman")
+
+corr_data$r %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     border_color = NA, 
+                     annotation_row = annotation_row_vec, 
+                     annotation_colors = list(. = collection_time_point_palette))
+```
+
+## Number of clusters determination
+
+```{r}
+fviz_nbclust(corr_data$r, FUNcluster = hclust_func, method = "silhouette")
+```
+
+## Clustering
+
+```{r}
+cor_res <- corr_data$r %>% 
+  dist(method = "euclidean") %>% 
+  hclust(method = "ward.D") 
+
+cor_res %>% 
+  factoextra::fviz_dend(cex = 0.2, 
+            k = 4, 
+            k_colors = "jco")
+
+labels <- cor_res %>% 
+  cutree(k = 4)
+```
+
+```{r, fig.height=10, fig.width=25}
+data_subset_sorted <- data_subset %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  mutate(labels = labels) %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+
+```
+
+## Assessment
+### Sillhouette
+
+```{r}
+sil <- silhouette(cor_res %>% cutree(k = 4), 
+                  corr_data$r %>% dist(method = "euclidean"))
+fviz_silhouette(sil) +
+  theme_bw()
+```
+
+### Jaccard Similarity
+
+```{r}
+r_mtx <- as.matrix(corr_data$r)
+
+cpx <- clusterboot(r_mtx, 
+            B = 100, k = 4,
+            clustermethod = Hclustering, 
+            bootmethod = "boot", 
+            multipleboot = FALSE)
+```
+
+```{r}
+print(cpx)
+```
+
+## Survival
+
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new, Collection_time)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.) 
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7)) 
+```
+
+
+## Cluster characteristics
+
+```{r}
+stats <- list()
+
+colnames(labels) <- c("consensus")
+
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, 
+                               Collection_Day, Time_CFS, Event)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+data_subset_cc <- cbind(labels, data_subset) %>% 
+  filter(consensus != 7) %>% 
+  mutate(consensus = as.factor(consensus))
+
+for (i in c(1:n_distinct(data_subset_cc$consensus))) {
+  data_internal <- data_subset_cc %>% 
+    mutate(across(where(is.numeric), scale)) %>% 
+    mutate(test_col = ifelse(consensus == i, i, "other")) %>% 
+    select(everything(), -c(consensus))
+  
+  MD <- data_internal %>% 
+    summarise(across(where(is.numeric), 
+                       ~ t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate1 - 
+                        t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate2))# %>% log2()
+  
+  Ps <- data_internal %>% 
+    summarise(across(where(is.numeric), ~ t_test(.x ~ test_col, data = data_internal, 
+                                               detailed = TRUE)$p))
+  p.adj <- p.adjust(Ps, method = "BH")
+  
+  stats[[paste(i, "vs. all")]] <- as.data.frame(t(rbind(MD, Ps, p.adj)))
+  colnames(stats[[paste(i, "vs. all")]]) <- c("MeanDiff", "P", "Padj")
+}
+```
+
+```{r, fig.width=10, fig.height = 10}
+library(cowplot)
+
+plot_MD <- function(data){
+  d <- data %>% 
+    mutate(label = rownames(data)) %>% 
+    filter(Padj < 0.05) %>% 
+    arrange(desc(abs(MeanDiff))) %>% 
+    slice_head(n = 10) %>% 
+    arrange(desc(MeanDiff)) 
+  
+  if (nrow(d) > 0) {
+    d$position = seq(nrow(d), 1)
+  } else {
+    return(
+      ggplot() +
+        annotate("text", 
+                 x = 3, y = 6, label = "No Sign. Features", 
+                 size = 5, color = "red") +
+        theme_bw()
+    )
+  }
+  
+  min <- min(d$MeanDiff)
+  max <- max(d$MeanDiff)
+  
+  p <- ggplot(d, aes(x = MeanDiff, y = position)) +          
+      geom_text(aes(label = label),       
+                vjust = -0.5,              
+                hjust = 0,             
+                color = "black") +  
+      xlim(min, max + 0.5) +
+      ylim(.5, 10.5) +
+      theme_bw()
+  
+  return(p)
+}
+
+plot_grid(plotlist = lapply(stats, plot_MD))
+```
+
+# Clustering Embedding
+
+## PCA
+
+```{r}
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, 
+                               Collection_Day, Time_CFS, Event)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+```
+
+### Picking appropriate factorization
+
+```{r}
+data_subset %>% 
+  prcomp() %>% 
+  fviz_eig(addlabels = TRUE)
+ 
+```
+
+### Factorization & Visualization
+
+```{r}
+data_subset %>% 
+  prcomp(rank. = 10) -> res.pca
+
+fviz_pca_ind(res.pca, 
+             label="none", 
+             habillage=gsub("[0-9]", "", rownames(data_subset)),
+             addEllipses=TRUE, 
+             ellipse.level=0.95, 
+             palette = collection_time_point_palette, 
+             title = "Cohort at day 90")
+```
+
+```{r}
+fviz_contrib(res.pca, choice="var", axes = 1, top = 10)
+fviz_contrib(res.pca, choice="var", axes = 2, top = 10)
+```
+
+
+### Number of clusters determination
+
+```{r}
+fviz_nbclust(res.pca$x, FUNcluster = kmeans, method = "silhouette")
+```
+
+### Clustering
+
+```{r}
+res <- kmeans(res.pca$x, centers = 4, nstart = 100)
+data_subset$labels <- as.factor(res$cluster)
+
+fviz_pca_ind(res.pca, 
+             label="none", 
+             habillage=data_subset$labels,
+             addEllipses=TRUE, 
+             ellipse.level=0.95, 
+             palette = "Dark2", 
+             title = "Cohort at day 90 Clustering")
+```
+
+```{r, fig.height=10, fig.width=25}
+data_subset_sorted <- data_subset %>% 
+  arrange(labels)
+
+labels <- data_subset_sorted %>% 
+  pull(labels) %>% 
+  as.data.frame()
+
+data_subset_sorted <-data_subset_sorted %>% 
+  select(everything(), -labels)
+
+rownames(labels) <- rownames(data_subset_sorted)
+labels$. <- as.factor(labels$.)
+
+data_subset_sorted %>% 
+  mutate(across(everything(), ~ pmax(pmin(., 2), 0))) %>% 
+  pheatmap::pheatmap(cellwidth = 8, 
+                     cellheight = 8, 
+                     cluster_rows = FALSE,
+                     annotation_row = labels,
+                     border_color = NA)
+```
+
+### Assessment
+#### Sillhouette
+
+```{r}
+sil <- silhouette(as.numeric(data_subset$labels), 
+                  res.pca$x %>% dist(method = "euclidean"))
+fviz_silhouette(sil) +
+  theme_bw()
+```
+
+#### Jaccard Similarity
+
+```{r}
+KMEANSclustering <- function(data_matrix, k = 4) {
+  res <- data_matrix %>% 
+    kmeans(centers = k, nstart = 100)
+  
+  clusters <- res$cluster
+  
+  if (!is.factor(clusters)) {
+    clusters <- factor(clusters)
+  }
+  
+  levels(clusters) <- as.character(0:k-1)
+
+  clist <- lapply(levels(clusters), function(cluster) {clusters == cluster})
+  names(clist) <- levels(clusters)
+
+  output = list(
+    result = clusters,
+    nc = n_distinct(clusters),
+    clusterlist = clist,
+    partition = rep(1, length(clusters)),
+    clustermethod = "KMEANS"
+  )
+  
+  return(output)
+}
+```
+
+
+
+```{r}
+cpx <- clusterboot(as.matrix(res.pca$x), 
+            B = 100, k = 4,
+            clustermethod = KMEANSclustering, 
+            bootmethod = "boot", 
+            multipleboot = FALSE)
+```
+```{r}
+print(cpx)
+```
+
+
+### Survival
+
+```{r}
+ds1 <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  select(Time_CFS, Event, ID_new)
+  
+
+ds2 <- data_subset_sorted %>% 
+  mutate(ID_new = rownames(data_subset_sorted), 
+         labels = labels$.)
+
+merged <- merge(ds1, ds2, by.x="ID_new", by.y="ID_new", all=T)
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ `labels`, data = merged)
+
+ggsurvplot(fit, 
+           data = merged,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.3,
+           pval = TRUE,
+           pval.coord = c(650, 0.7)) 
+```
+
+
+### Cluster characteristics
+
+```{r}
+stats <- list()
+
+colnames(labels) <- c("consensus")
+
+data_subset <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>% 
+  select(where(is.numeric), -c(Post_cGVHD_time, ID, Time_OS, cGVHD_time, 
+                               Collection_Day, Time_CFS, Event)) %>% 
+  #select(contains("226")) %>% 
+  log1p() %>% 
+  scale() %>% 
+  as.data.frame()
+
+rownames(data_subset) <- data %>% 
+  filter(is.na(cGVHD_day)) %>% 
+  filter(!is.na(Collection_time) & Collection_Day %in% c("90") & Collection_time != "Post") %>%
+  mutate(ID_new = paste0(Collection_time, ID)) %>% 
+  pull(ID_new)
+
+data_subset_cc <- cbind(labels, data_subset) %>% 
+  mutate(consensus = as.factor(consensus))
+
+for (i in c(1:n_distinct(data_subset_cc$consensus))) {
+  data_internal <- data_subset_cc %>% 
+    mutate(across(where(is.numeric), scale)) %>% 
+    mutate(test_col = ifelse(consensus == i, i, "other")) %>% 
+    select(everything(), -c(consensus))
+  
+  MD <- data_internal %>% 
+    summarise(across(where(is.numeric), 
+                       ~ t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate1 - 
+                        t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate2))# %>% log2()
+  
+  Ps <- data_internal %>% 
+    summarise(across(where(is.numeric), ~ t_test(.x ~ test_col, data = data_internal, 
+                                               detailed = TRUE)$p))
+  p.adj <- p.adjust(Ps, method = "BH")
+  
+  stats[[paste(i, "vs. all")]] <- as.data.frame(t(rbind(MD, Ps, p.adj)))
+  colnames(stats[[paste(i, "vs. all")]]) <- c("MeanDiff", "P", "Padj")
+}
+```
+
+```{r, fig.width=10, fig.height = 10}
+library(cowplot)
+
+plot_MD <- function(data){
+  d <- data %>% 
+    mutate(label = rownames(data)) %>% 
+    filter(Padj < 0.05) %>% 
+    arrange(desc(abs(MeanDiff))) %>% 
+    slice_head(n = 10) %>% 
+    arrange(desc(MeanDiff)) 
+  
+  if (nrow(d) > 0) {
+    d$position = seq(nrow(d), 1)
+  } else {
+    return(
+      ggplot() +
+        annotate("text", 
+                 x = 3, y = 6, label = "No Sign. Features", 
+                 size = 5, color = "red") +
+        theme_bw()
+    )
+  }
+  
+  min <- min(d$MeanDiff)
+  max <- max(d$MeanDiff)
+  
+  p <- ggplot(d, aes(x = MeanDiff, y = position)) +          
+      geom_text(aes(label = label),       
+                vjust = -0.5,              
+                hjust = 0,             
+                color = "black") +  
+      xlim(min, max + 0.5) +
+      ylim(.5, 10.5) +
+      theme_bw()
+  
+  return(p)
+}
+
+plot_grid(plotlist = lapply(stats, plot_MD))
+```
+
+## NMF (scaled)
+### Picking appropriate factorization rank
+
+```{r}
+normalize <- function(x, na.rm = TRUE) {
+    return((x - min(x)) /(max(x) - min(x)))
+}
+
+data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
+                          Collection_Day, Source, cGVHD_time_discrete, 
+                          Collection_time, Post_cGVHD_time)) %>% 
+  mutate(across(-Event, log1p), 
+         across(-Event, normalize), 
+         Event = as.factor(Event)) -> data_filtered
+
+event <- data_filtered %>% 
+  pull(Event)
+
+data_filtered <- data_filtered %>% 
+  select(everything(), -Event) %>% 
+  t() %>% 
+  as.data.frame()
+
+data_filtered_random <- randomize(data_filtered)
+```
+
+```{r}
+estim.r.random <- nmf(data_filtered_random, 
+                      2:15, 
+                      nrun=10, 
+                      seed=42)
+
+estim.r <- nmf(data_filtered, 
+               2:15, 
+               nrun=10, 
+               seed=42)
+```
+
+```{r, fig.height=7, fig.width=12}
+plot(estim.r, estim.r.random)
+```
+
+```{r}
+estim.r <- nmf(data_filtered, 
+               5, 
+               nrun = 100, 
+               seed = 42, 
+               .options = "t", 
+               .pbackend = 6)
+
+plot(estim.r)
+```
+
+### Cluster Stability 
+
+```{r}
+NMFclustering <- function(data_matrix, k = 5) {
+  res <- nmf(t(data_matrix), k, nrun=100, seed=42)
+  clusters <- predict(res)
+  if (!is.factor(clusters)) {
+    clusters <- factor(clusters)
+  }
+  
+  levels(clusters) <- as.character(0:k-1)
+
+  clist <- lapply(levels(clusters), function(cluster) {clusters == cluster})
+  names(clist) <- levels(clusters)
+
+  output = list(
+    result = clusters,
+    nc = n_distinct(clusters),
+    clusterlist = clist,
+    partition = rep(1, length(clusters)), 
+    clustermethod = "NMF"
+  )
+  
+  return(output)
+}
+
+```
+
+```{r}
+mtx <- as.matrix(data_filtered)
+```
+
+```{r}
+cpx <- clusterboot(t(mtx), 
+            B = 10, 
+            clustermethod = NMFclustering, 
+            bootmethod = "boot", 
+            multipleboot = TRUE)
+
+print(cpx)
+```
+
+```{r fig.height=5, fig.width=8}
+res <- nmf(data_filtered, 5, nrun=100, seed=42)
+
+layout(cbind(1,2))
+basismap(res)
+coefmap(res)
+```
+
+```{r}
+consensusmap(res, labCol=NA, labRow=NA)
+```
+
+```{r}
+event <- as.data.frame(event)
+rownames(event) <- paste0("V", rownames(event))
+
+cc <- as.data.frame(predict(res))
+colnames(cc) <- c("consensus")
+```
+
+```{r, fig.height=7, fig.width=10}
+library(RColorBrewer)
+
+event_colors <- setNames(brewer.pal(length(unique(event$event)), "Set2"), unique(event$event))
+cc_colors <- setNames(brewer.pal(length(unique(cc$consensus)), "Pastel1"), unique(cc$consensus))
+
+annotation_colors <- list(event = event_colors, consensus = cc_colors)
+
+order <- cc %>% 
+  arrange(consensus) %>% 
+  rownames()
+
+pheatmap::pheatmap(res@consensus[order, order], 
+                     cellwidth = 6, cellheight = 6, 
+                     cluster_rows = F, cluster_cols = F,
+                     annotation_col = cbind(event, cc),
+                     annotation_colors = annotation_colors,
+                     border_color = NA)
+```
+
+### Cluster charcterization
+
+```{r}
+W <- res@fit@W
+colnames(W) <- c(1:5)
+top_features_all <- lapply(1:ncol(W), function(cluster) {
+  sort(W[, cluster], decreasing = TRUE)[1:10]
+})
+
+names(top_features_all) <- paste0("Cluster_", 1:ncol(W))
+print(top_features_all)
+
+```
+
+```{r, fig.height=6}
+top_feature_names <- unique(unlist(lapply(top_features_all, names)))
+W_top <- W[top_feature_names, ] 
+
+pheatmap::pheatmap(t(W_top), 
+                   cellwidth = 10, 
+                   cellheight = 8, 
+                   cluster_rows = F,
+                   show_rownames = T,
+                   cluster_cols = T, 
+                   border_color = NA, 
+                   scale = "row")
+```
+
+```{r}
+stats <- list()
+
+colnames(labels) <- c("consensus")
+
+data_filtered_full <- data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  as.data.frame()
+
+data_subset_cc <- cbind(cc, data_filtered_full) %>% 
+  #filter(consensus != 7) %>% 
+  mutate(consensus = as.factor(consensus))
+
+for (i in c(1:n_distinct(data_subset_cc$consensus))) {
+  data_internal <- data_subset_cc %>% 
+    mutate(test_col = ifelse(consensus == i, i, "other")) %>% 
+    select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
+                          Collection_Day, Source, cGVHD_time_discrete, 
+                          Collection_time, Post_cGVHD_time, Event, consensus))
+  
+  log2FC <- data_internal %>% 
+    summarise(across(where(is.numeric), 
+                       ~ t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate1 / 
+                        t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate2)) %>% log2()
+  
+  Ps <- data_internal %>% 
+    summarise(across(where(is.numeric), ~ t_test(.x ~ test_col, data = data_internal, 
+                                               detailed = TRUE)$p))
+  
+  p.adj <- p.adjust(Ps, method = "BH")
+  
+  stats[[paste(i, "vs. all")]] <- as.data.frame(t(rbind(log2FC, Ps, p.adj)))
+  colnames(stats[[paste(i, "vs. all")]]) <- c("LFC", "P", "Padj")
+}
+```
+
+```{r, fig.width=10, fig.height = 10}
+library(cowplot)
+
+plot_LFC <- function(data){
+  d <- data %>% 
+    mutate(label = rownames(data)) %>% 
+    filter(Padj < 0.05) %>% 
+    arrange(desc(abs(LFC))) %>% 
+    slice_head(n = 10) %>% 
+    arrange(desc(LFC)) 
+  
+  if (nrow(d) > 0) {
+    d$position = seq(nrow(d), 1)
+  } else {
+    return(
+      ggplot() +
+        annotate("text", 
+                 x = 3, y = 6, label = "No Sign. Features", 
+                 size = 5, color = "red") +
+        theme_bw()
+    )
+  }
+  
+  min <- min(d$LFC)
+  max <- max(d$LFC)
+  
+  p <- ggplot(d, aes(x = LFC, y = position)) +          
+      geom_text(aes(label = label),       
+                vjust = -0.5,              
+                hjust = 0,             
+                color = "black") +  
+      xlim(min, max + 1) +
+      ylim(.5, 10.5) +
+      theme_bw()
+  
+  return(p)
+}
+
+plot_grid(plotlist = lapply(stats, plot_LFC))
+```
+
+## NMF (log)
+### Picking appropriate factorization rank
+
+```{r}
+data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
+                          Collection_Day, Source, cGVHD_time_discrete, 
+                          Collection_time, Post_cGVHD_time)) %>% 
+  mutate(across(-Event, log1p), 
+         # across(-Event, normalize), 
+         Event = as.factor(Event)) -> data_filtered
+
+event <- data_filtered %>% 
+  pull(Event)
+
+data_filtered <- data_filtered %>% 
+  select(everything(), -Event) %>% 
+  t() %>% 
+  as.data.frame()
+
+data_filtered_random <- randomize(data_filtered)
+```
+
+```{r}
+estim.r.random <- nmf(data_filtered_random, 
+                      2:15, 
+                      nrun=10, 
+                      seed=42)
+
+estim.r <- nmf(data_filtered, 
+               2:15, 
+               nrun=10, 
+               seed=42)
+```
+
+```{r, fig.height=7, fig.width=12}
+plot(estim.r, estim.r.random)
+```
+
+```{r}
+estim.r <- nmf(data_filtered, 
+               7, 
+               nrun = 100, 
+               seed = 42, 
+               .options = "t", 
+               .pbackend = 6)
+
+plot(estim.r)
+```
+
+### Cluster Stability 
+
+```{r}
+mtx <- as.matrix(data_filtered)
+```
+
+```{r}
+cpx <- clusterboot(t(mtx), 
+            B = 10, k = 7,
+            clustermethod = NMFclustering, 
+            bootmethod = "boot", 
+            multipleboot = TRUE)
+
+print(cpx)
+```
+
+```{r fig.height=5, fig.width=8}
+res <- nmf(data_filtered, 7, nrun=100, seed=42)
+
+layout(cbind(1,2))
+basismap(res)
+coefmap(res)
+```
+
+```{r}
+consensusmap(res, labCol=NA, labRow=NA)
+```
+
+```{r}
+event <- as.data.frame(event)
+rownames(event) <- paste0("V", rownames(event))
+
+cc <- as.data.frame(predict(res))
+colnames(cc) <- c("consensus")
+```
+
+```{r, fig.height=7, fig.width=10}
+library(RColorBrewer)
+
+event_colors <- setNames(brewer.pal(length(unique(event$event)), "Set2"), unique(event$event))
+cc_colors <- setNames(brewer.pal(length(unique(cc$consensus)), "Pastel1"), unique(cc$consensus))
+
+annotation_colors <- list(event = event_colors, consensus = cc_colors)
+
+order <- cc %>% 
+  arrange(consensus) %>% 
+  rownames()
+
+pheatmap::pheatmap(res@consensus[order, order], 
+                     cellwidth = 6, cellheight = 6, 
+                     cluster_rows = F, cluster_cols = F,
+                     annotation_col = cbind(event, cc),
+                     annotation_colors = annotation_colors,
+                     border_color = NA)
+```
+
+### Cluster charcterization
+
+```{r}
+W <- res@fit@W
+colnames(W) <- c(1:7)
+top_features_all <- lapply(1:ncol(W), function(cluster) {
+  sort(W[, cluster], decreasing = TRUE)[1:10]
+})
+
+names(top_features_all) <- paste0("Cluster_", 1:ncol(W))
+print(top_features_all)
+
+```
+
+```{r, fig.height=6}
+top_feature_names <- unique(unlist(lapply(top_features_all, names)))
+W_top <- W[top_feature_names, ] 
+
+pheatmap::pheatmap(t(W_top), 
+                   cellwidth = 10, 
+                   cellheight = 8, 
+                   cluster_rows = F,
+                   show_rownames = T,
+                   cluster_cols = T, 
+                   border_color = NA, 
+                   scale = "row")
+```
+
+```{r}
+stats <- list()
+
+colnames(labels) <- c("consensus")
+
+data_filtered_full <- data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  as.data.frame()
+
+data_subset_cc <- cbind(cc, data_filtered_full) %>% 
+  filter(consensus != 7) %>% 
+  mutate(consensus = as.factor(consensus))
+
+for (i in c(1:n_distinct(data_subset_cc$consensus))) {
+  data_internal <- data_subset_cc %>% 
+    mutate(test_col = ifelse(consensus == i, i, "other")) %>% 
+    select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
+                          Collection_Day, Source, cGVHD_time_discrete, 
+                          Collection_time, Post_cGVHD_time, Event, consensus))
+  
+  log2FC <- data_internal %>% 
+    summarise(across(where(is.numeric), 
+                       ~ 1 + (t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate1 / 
+                        t_test(.x ~ test_col, 
+                                data = data_internal, 
+                                detailed = TRUE)$estimate2))) %>% log2()
+  
+  Ps <- data_internal %>% 
+    summarise(across(where(is.numeric), ~ t_test(.x ~ test_col, data = data_internal, 
+                                               detailed = TRUE)$p))
+  
+  p.adj <- p.adjust(Ps, method = "BH")
+  
+  stats[[paste(i, "vs. all")]] <- as.data.frame(t(rbind(log2FC, Ps, p.adj)))
+  colnames(stats[[paste(i, "vs. all")]]) <- c("LFC", "P", "Padj")
+}
+```
+
+```{r, fig.width=10, fig.height = 10}
+library(cowplot)
+
+plot_LFC <- function(data){
+  d <- data %>% 
+    mutate(label = rownames(data)) %>% 
+    filter(Padj < 0.05) %>% 
+    arrange(desc(abs(LFC))) %>% 
+    slice_head(n = 10) %>% 
+    arrange(desc(LFC)) 
+  
+  if (nrow(d) > 0) {
+    d$position = seq(nrow(d), 1)
+  } else {
+    return(
+      ggplot() +
+        annotate("text", 
+                 x = 3, y = 6, label = "No Sign. Features", 
+                 size = 5, color = "red") +
+        theme_bw()
+    )
+  }
+  
+  min <- min(d$LFC)
+  max <- max(d$LFC)
+  
+  p <- ggplot(d, aes(x = LFC, y = position)) +          
+      geom_text(aes(label = label),       
+                vjust = -0.5,              
+                hjust = 0,             
+                color = "black") +  
+      xlim(min, max + 1) +
+      ylim(.5, 10.5) +
+      theme_bw()
+  
+  return(p)
+}
+
+plot_grid(plotlist = lapply(stats, plot_LFC))
+```
+
+
+
+### Survival
+
+```{r}
+data_filtered_t <- data_filtered %>% 
+  t() %>% 
+  as.data.frame()
+```
+
+```{r, fig.height=5}
+ds_cfs <- data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  select(c(ID, Time_CFS, Event)) %>% 
+  as.data.frame()
+
+rownames(ds_cfs) <- rownames(data_filtered_t)
+
+ds_cfs_cc <- cbind(ds_cfs[rownames(cc),], cc) %>% filter(consensus != 7)
+
+#ds_cfs_cc = ds_cfs_cc %>% filter(Event == 1) %>% filter(!(consensus %in% c(4, 6)))
+
+surv_object <- Surv(time = as.numeric(ds_cfs_cc$Time_CFS), event = ds_cfs_cc$Event)
+
+fit <- survfit(surv_object ~ consensus, data = ds_cfs_cc)
+
+ggsurvplot(fit, 
+           data = ds_cfs_cc,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.375,
+           pval = TRUE,
+           #xlim = c(0, 365),
+           pval.coord = c(300, 0.99)) 
+```
+
+# Feature Selection + Clustering
+
