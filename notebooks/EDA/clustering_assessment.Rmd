@@ -1168,9 +1168,15 @@ print(top_features_all)
 
 ```
 
+```{r}
+W %>% write.csv("~/GVHD_project/data/W_nmf.csv")
+```
+
 ```{r, fig.height=6}
 top_feature_names <- unique(unlist(lapply(top_features_all, names)))
 W_top <- W[top_feature_names, ] 
+
+W_top %>% write.csv("~/GVHD_project/data/W_top_nmf.csv")
 
 pheatmap::pheatmap(t(W_top), 
                    cellwidth = 10, 
