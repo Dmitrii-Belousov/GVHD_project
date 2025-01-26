@@ -1310,6 +1310,112 @@ ggsurvplot(fit,
            pval.coord = c(300, 0.99)) 
 ```
 
+```{r}
+ds_cfs_cc <- ds_cfs_cc %>% 
+  mutate(
+    RiskGroup = as.factor(case_when(
+      consensus %in% c(6, 4, 3) ~ "Low Risk",
+      consensus %in% c(5) ~ "Medium Risk",
+      consensus %in% c(1, 2) ~ "High Risk"
+    ))
+  ) %>% 
+  mutate(RiskGroup = factor(RiskGroup, levels = c("High Risk", "Medium Risk", "Low Risk")))
+
+surv_object <- Surv(time = as.numeric(ds_cfs_cc$Time_CFS), event = ds_cfs_cc$Event)
+
+fit <- survfit(surv_object ~ RiskGroup, data = ds_cfs_cc)
+
+risk_palette <- c(
+  "High Risk" = "#B25372",
+  "Medium Risk" = "#A26A27",
+  "Low Risk" = "#00926C"
+)
+
+sp <- ggsurvplot(fit, 
+           data = ds_cfs_cc,
+           title = "Risk groups survival",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.375,
+           pval = TRUE,
+           fun = "event",
+           xlab = "Time, days",
+           ylim = c(0, 1),
+           color = "RiskGroup",
+           palette = risk_palette,
+           pval.coord = c(0, 0.99)) 
+
+sp
+```
+
+```{r}
+my_times <- c(365.25)
+my_probs <- c(0.25,0.5,0.75)
+
+print(summary(fit, my_times))
+```
+
+```{r, figure.dpi=200}
+sp$plot +
+  geom_text(x = 190, y = 0.99,
+            label = "1-year EFS probability in High Risk 0.267 [95%CI 0.115; 0.617]",
+            hjust = 0,
+            size = 4, 
+            colour = "#B25372") +
+  geom_text(x = 190, y = 0.92,
+            label = "1-year EFS probability in Medium Risk 0.542 [95%CI 0.357; 0.823]",
+            hjust = 0,
+            size = 4, 
+            colour = "#A26A27") +
+  geom_text(x = 190, y = 0.85,
+            label = "1-year EFS probability in Low Risk 0.7721 [95%CI 0.6265; 0.9516]",
+            hjust = 0,
+            size = 4, 
+            colour = "#00926C")   
+```
+
+```{r}
+lifetab2(surv_object ~ 1, ds_cfs_cc, breaks = seq(from = 0,
+                                             to = 1022,
+                                             by = 180))
+```
+
+```{r}
+haz <- fitSmoothHazard(Event ~ Time_CFS + RiskGroup,
+                data = ds_cfs_cc,
+                time = "Time_CFS")
+
+gg_object <- plot(haz,
+                  hazard.params = list(xvar = "Time_CFS",
+                                       by = "RiskGroup",
+                                       alpha = 0.05, # 95% CI
+                                       ylab = "Hazard",
+                                       gg = TRUE)) 
+gg_object +
+  theme_bw()
+```
+
+```{r}
+cox_model <- coxph(Surv(Time_CFS, Event) ~ RiskGroup, 
+                   data = ds_cfs_cc)
+tbl_regression(cox_model, exp = TRUE)
+```
+
+```{r}
+ggcoxdiagnostics(cox_model, type = "schoenfeld") +
+  theme_bw()
+
+test.ph <- cox.zph(cox_model)
+ggcoxzph(test.ph)
+print(test.ph)
+```
+
+```{r haz_5}
+ggcoxdiagnostics(cox_model, type = "dfbeta", ggtheme = theme_bw())
+ggcoxdiagnostics(cox_model, type = "dfbetas", ggtheme = theme_bw())
+ggcoxdiagnostics(cox_model, type = "deviance", ggtheme = theme_bw()) 
+```
+
 # Feature Selection + Clustering
 
 
