@@ -10,19 +10,19 @@
 
 1. **Дмитрий Белоусов**  
    - Вклад в проект: Разведочный анализ данных, кластеризация, NMF, PERMANOVA  
-   - Email: [dmbelousov1806@gmail.com]
+   - Email: dmbelousov1806@gmail.com
 
 2. **Наталья Ласкина**  
    - Вклад в проект: Разведочный анализ данных, логистическая регрессия, Lasso  
-   - Email: [lask.natalia@gmail.com]
+   - Email: lask.natalia@gmail.com
 
 3. **Елена Марочкина**  
    - Вклад в проект: Разведочный анализ данных, кластеризация, RFS, Boruta  
-   - Email: [marochkina.lena@gmail.com]
+   - Email: marochkina.lena@gmail.com
 
 4. **Сергей Смирнов**  
    - Вклад в проект: Разведочный анализ данных, регрессия Кокса  
-   - Email: [sergeysmirnov11111@gmail.com]
+   - Email: sergeysmirnov11111@gmail.com
 
 ## Теоретические основы
 
