@@ -51,7 +51,7 @@ CD39 (эктонуклеозидтрифосфатдифосфогидролаз
 
 ## Изображение исследования экспрессии маркеров функционального статуса
 
-![Исследование экспрессии маркеров функционального статуса](image.png)
+![Исследование экспрессии маркеров функционального статуса](photo_2025-01-27_23-32-58.jpg)
 
 ## Литература
 - Ahmed, A., et al. (2018). Circulating HLA-DR+CD4+ effector memory T cells resistant to CCR5 and PD-L1 mediated suppression compromise regulatory T cell function in tuberculosis. *PLoS Pathogens*.
