@@ -1,7 +1,5 @@
 ---
 title: "Project_cGVHD"
-author: "NataliaLaskina"
-date: "2024-11-20"
 output: html_document
 ---
 
@@ -42,14 +40,18 @@ library(glmnet)
 library(Matrix)
 library(reshape2)
 library(NbClust)
+library(renv)
 ```
 
 #Чтение данных
 
 ```{r}
 
-AI_Tcells <- read_csv("../raw_data
-/AI_Tcells_для ЕА - Sheet1.csv")
+AI_Tcells <- read_csv(
+  "../../raw_data/AI_Tcells_для ЕА - Sheet1.csv",
+  locale = locale(decimal_mark = ","),  # указываем, что десятичный разделитель - запятая
+  show_col_types = FALSE
+)
 
 glimpse(AI_Tcells)
 
@@ -150,95 +152,259 @@ statistics <- list(
 
 
 
-AI_Tcells_filtered %>%
+#AI_Tcells_filtered %>%
+ # select(`Analysis_day`, `Сell_population`, `cGVHD_present`, Abs_Value) %>%
+  #group_by(`Analysis_day`, `Сell_population`, `cGVHD_present`) %>%
+  #summarize(across(Abs_Value, statistics)) %>% # Применяем список statistics к Abs_Value
+  #pivot_longer(cols = -c(`Analysis_day`, `Сell_population`, `cGVHD_present`)) %>%
+  #separate(name, into = c("Variable", "Statistics"), sep = "__") %>%
+  #pivot_wider(names_from = c(cGVHD_present, Statistics), values_from = value) %>%
+  #arrange(Analysis_day, Сell_population) %>%
+  #flextable() %>%
+  #theme_box() %>%
+  #align(align = "center", part = "all") %>%
+  #merge_v(c("Analysis_day", "Сell_population"))
+
+
+
+# Создаём функцию для t-теста
+t_test_wrapper <- function(data, var) {
+  # Проверяем достаточно ли данных в каждой группе
+  n_yes <- sum(!is.na(data$Abs_Value[data$cGVHD_present == "Yes"]))
+  n_no <- sum(!is.na(data$Abs_Value[data$cGVHD_present == "No"]))
+  
+  if(n_yes < 3 || n_no < 3) {
+    return("Н/П*")
+  }
+  
+  # Выполняем t-тест
+  test_result <- try(
+    t.test(Abs_Value ~ cGVHD_present, data = data)$p.value,
+    silent = TRUE
+  )
+  
+  if(inherits(test_result, "try-error")) {
+    return("Ошибка")
+  }
+  
+  return(as.character(round(test_result, 4)))
+}
+
+# Сначала соберем все p-values в отдельный датафрейм
+p_values_df <- AI_Tcells_filtered %>%
+  group_by(Analysis_day, Сell_population) %>%
+  summarise(
+    p_value = t_test_wrapper(cur_data(), Abs_Value),
+    .groups = "drop"
+  )
+
+# Создаем вектор для хранения скорректированных p-values
+p_values_df <- p_values_df %>%
+  mutate(
+    adj_p_value = p_value  # Сначала копируем исходные p-values
+  )
+
+# Находим индексы числовых p-values
+numeric_indices <- !p_values_df$p_value %in% c("Н/П*", "Ошибка")
+
+if(sum(numeric_indices) > 0) {
+  # Конвертируем в числовой формат только валидные p-values
+  numeric_p_values <- as.numeric(p_values_df$p_value[numeric_indices])
+  
+  # Применяем коррекцию только к числовым значениям
+  adj_p_values <- p.adjust(numeric_p_values, method = "BH")
+  
+  # Обновляем только числовые значения в столбце adj_p_value
+  p_values_df$adj_p_value[numeric_indices] <- as.character(round(adj_p_values, 4))
+}
+
+# Основной код для создания таблицы
+result <- AI_Tcells_filtered %>%
   select(`Analysis_day`, `Сell_population`, `cGVHD_present`, Abs_Value) %>%
   group_by(`Analysis_day`, `Сell_population`, `cGVHD_present`) %>%
-  summarize(across(Abs_Value, statistics)) %>% # Применяем список statistics к Abs_Value
+  summarize(across(Abs_Value, statistics), .groups = "drop") %>%
   pivot_longer(cols = -c(`Analysis_day`, `Сell_population`, `cGVHD_present`)) %>%
   separate(name, into = c("Variable", "Statistics"), sep = "__") %>%
   pivot_wider(names_from = c(cGVHD_present, Statistics), values_from = value) %>%
+  # Присоединяем p-values
+  left_join(p_values_df, by = c("Analysis_day", "Сell_population")) %>%
+    rename(
+    "t-test, p-value" = p_value,
+    "t-test, adj p-value (BH)" = adj_p_value
+  ) %>%
+  # Создаём финальную таблицу
   arrange(Analysis_day, Сell_population) %>%
   flextable() %>%
   theme_box() %>%
   align(align = "center", part = "all") %>%
   merge_v(c("Analysis_day", "Сell_population"))
 
+# Выводим таблицу
+result
 
 ```
 
-В таблице столбцы No- для тех, у кого не развилось cGVHD, Yes - у кого развилось
+В таблицах столбцы No- для тех, у кого не развилось cGVHD, Yes - у кого развилось
+
+## Описательная таблица только для дня анализа 90
+
+```{r}
+# Те же статистики 
+statistics <- list(
+  `_Количество субъектов` = ~length(.x) %>% as.character(),
+  `_Количество (есть данные)` = ~sum(!is.na(.x)) %>% as.character(),
+  `_Нет данных` = ~sum(is.na(.x)) %>% as.character(),
+  `_Ср. знач.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", mean(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `_Станд. отклон.` = ~ifelse(sum(!is.na(.x)) < 3, "Н/П*", sd(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `_95% ДИ для среднего` = ~{
+    n <- sum(!is.na(.x))
+    ifelse(n < 3, "Н/П*", 
+           paste0(round(mean(.x, na.rm = TRUE) - 1.96 * sd(.x, na.rm = TRUE) / sqrt(n), 2), " - ", round(mean(.x, na.rm = TRUE) + 1.96 * sd(.x, na.rm = TRUE) / sqrt(n), 2))
+    )
+  },
+  `_мин. - макс.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(min(.x, na.rm = TRUE) %>% round(2), " - ", max(.x, na.rm = TRUE) %>% round(2))),
+  `_Медиана` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", median(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `_Q1 - Q3` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(quantile(.x, 0.25, na.rm = TRUE) %>% round(2), " - ", quantile(.x, 0.75, na.rm = TRUE) %>% round(2)))
+)
+
+# Фильтруем данные только для +90 дней
+AI_Tcells_90 <- AI_Tcells_filtered %>%
+  filter(Analysis_day == "+90")
+
+# Функция для t-теста 
+t_test_wrapper <- function(data, var) {
+  n_yes <- sum(!is.na(data$Abs_Value[data$cGVHD_present == "Yes"]))
+  n_no <- sum(!is.na(data$Abs_Value[data$cGVHD_present == "No"]))
+  
+  if(n_yes < 3 || n_no < 3) {
+    return("Н/П*")
+  }
+  
+  test_result <- try(
+    t.test(Abs_Value ~ cGVHD_present, data = data)$p.value,
+    silent = TRUE
+  )
+  
+  if(inherits(test_result, "try-error")) {
+    return("Ошибка")
+  }
+  
+  return(as.character(round(test_result, 4)))
+}
+
+# Собираем p-values только для данных 90-го дня
+p_values_df_90 <- AI_Tcells_90 %>%
+  group_by(Сell_population) %>%
+  summarise(
+    p_value = t_test_wrapper(cur_data(), Abs_Value),
+    .groups = "drop"
+  )
+
+# Корректируем p-values
+p_values_df_90 <- p_values_df_90 %>%
+  mutate(
+    adj_p_value = p_value
+  )
+
+# Находим индексы числовых p-values
+numeric_indices <- !p_values_df_90$p_value %in% c("Н/П*", "Ошибка")
+
+if(sum(numeric_indices) > 0) {
+  numeric_p_values <- as.numeric(p_values_df_90$p_value[numeric_indices])
+  adj_p_values <- p.adjust(numeric_p_values, method = "BH")
+  p_values_df_90$adj_p_value[numeric_indices] <- as.character(round(adj_p_values, 4))
+}
+
+# Создаем финальную таблицу
+result_90 <- AI_Tcells_90 %>%
+  select(`Сell_population`, `cGVHD_present`, Abs_Value) %>%
+  group_by(`Сell_population`, `cGVHD_present`) %>%
+  summarize(across(Abs_Value, statistics), .groups = "drop") %>%
+  pivot_longer(cols = -c(`Сell_population`, `cGVHD_present`)) %>%
+  separate(name, into = c("Variable", "Statistics"), sep = "__") %>%
+  pivot_wider(names_from = c(cGVHD_present, Statistics), values_from = value) %>%
+  # Присоединяем p-values
+  left_join(p_values_df_90, by = c("Сell_population")) %>%
+  rename(
+    "t-test, p-value" = p_value,
+    "t-test, adj p-value (BH)" = adj_p_value
+  ) %>%
+  # Создаём финальную таблицу
+  arrange(Сell_population) %>%
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center", part = "all")
+
+# Выводим таблицу
+result_90
+```
+
 
 #Графики без логарифмирования
 
+## Без группировки, день 90
+
 ```{r}
-# 1. Добавление группирующей переменной 
-AI_Tcells_filtered <- AI_Tcells_filtered %>%
-  mutate(group = paste0("Group ", (as.numeric(Сell_population) -1) %/% 5 +1))
 
-# 2. Построение графиков с использованием facet_wrap 
-
-analysis_days <- unique(AI_Tcells_filtered$Analysis_day)
-groups <- unique(AI_Tcells_filtered$group)
+# 2. Построение графиков 
+analysis_days <- c("+90")  # Фиксируем день +90
+cell_populations <- unique(AI_Tcells_filtered$Сell_population)
 
 # Функция для создания одного графика
-create_plot <- function(day, grp, data) {
+create_plot <- function(day, cell_pop, data) {
   data_subset <- data %>%
-    filter(Analysis_day == day, group == grp)
+    filter(Analysis_day == day, Сell_population == cell_pop)
 
   if (nrow(data_subset) > 0) {
-    max_val <- max(data_subset$Abs_Value, na.rm = TRUE)
-
     p <- ggplot(data_subset, aes(x = cGVHD_present, y = Abs_Value, fill = cGVHD_present)) +
       geom_boxplot() +
-      ggpubr::stat_compare_means(method = "t.test", label.y = max_val - 0.1 * max_val) +
-      labs(title = paste("Abs_Value by cGVHD_present\n(Analysis_day =", day, ", Group =", grp, ")"),
+      ggpubr::stat_compare_means(method = "t.test", label.y = 0.8 * max(data_subset$Abs_Value, na.rm = TRUE), label.x = 1.5) +
+      labs(title = paste("Abs_Value by cGVHD_present\n(Analysis_day =", day, ", Cell Pop =", cell_pop, ")"),
            x = "cGVHD_present", y = "Abs_Value") +
       theme_bw() +
       theme(axis.text.x = element_text(angle = 45, hjust = 1),
             plot.title = element_text(hjust = 0.5)) +
-      facet_wrap(~Сell_population, scales = "free_x")
+      scale_y_continuous(limits = function(x) {
+        range_x <- max(x) - min(x)
+        c(min(x) - 0.1 * range_x, max(x) + 0.1 * range_x)
+      })
+    
     return(p)
   } else {
-    return(NULL) # Возвращаем NULL, если нет данных для данного дня и группы
+    return(NULL) # Возвращаем NULL, если нет данных
   }
 }
 
-
 # Создание всех графиков
 plots <- list()
-for (day in analysis_days) {
-  for (grp in groups) {
-    p <- create_plot(day, grp, AI_Tcells_filtered)
-    if (!is.null(p)) {
-      plots[[paste0("plot_", day, "_group_", grp)]] <- p
-      print(p)
-      #ggsave(paste0("plot_", day, "_group_", grp, ".png"), plot = p, width = 12, height = 8)
-    }
+for (cell_pop in cell_populations) {
+  p <- create_plot("+90", cell_pop, AI_Tcells_filtered)
+  if (!is.null(p)) {
+    print(p)
+    plots[[paste0("plot_90_", cell_pop)]] <- p
+    #ggsave(paste0("plot_90_", cell_pop, ".png"), plot = p, width = 10, height = 7)
   }
 }
 ```
 
-
 # Графики с логарифмированием
-
-ggpubr::stat_compare_means()
 
 ```{r}
 
 
 # 1. Добавление группирующей переменной для facet_wrap)
-AI_Tcells_filtered <- AI_Tcells_filtered %>%
+AI_Tcells_filtered_facet <- AI_Tcells_filtered %>%
   mutate(group = paste0("Group ", (as.numeric(Сell_population) -1) %/% 5 +1))
 
 
 # 2. Построение графиков с использованием facet_wrap
 
-analysis_days <- unique(AI_Tcells_filtered$Analysis_day)
-groups <- unique(AI_Tcells_filtered$group)
+analysis_days <- unique(AI_Tcells_filtered_facet$Analysis_day)
+groups <- unique(AI_Tcells_filtered_facet$group)
 
 for (day in analysis_days) {
   for (grp in groups) {
-    data_subset <- AI_Tcells_filtered %>%
+    data_subset <- AI_Tcells_filtered_facet %>%
       filter(Analysis_day == day, group == grp)
 
     if (nrow(data_subset) > 0) {
@@ -266,15 +432,15 @@ for (day in analysis_days) {
 
 ```
 
-
 #GLM wide data
 
 ##Подготовка данных
+
 ```{r}
 
-data_day90 <- select(filter(AI_Tcells_filtered, Analysis_day == "+90"), -group)
+data_day90 <- filter(AI_Tcells_filtered, Analysis_day == "+90")
 
-data_day180 <- select(filter(AI_Tcells_filtered, Analysis_day == "+180"), -group)
+data_day180 <- filter(AI_Tcells_filtered, Analysis_day == "+180")
 
 
 ```
@@ -292,6 +458,7 @@ data_wide_180 <- data_day180 %>%
 
 data_180 <- data_wide_180 %>%
   select(-ID, -Time_OS, -cGVHD_time, -Analysis_day, -Analysis_time)
+
 ```
 
 ## Первая модель, aliased coefficients
@@ -314,7 +481,9 @@ summary(model_180)
 car::vif(model_90)
 car::vif(model_180)
 ```
+
 #Корреляции
+
 ```{r}
 
 data_90_num <- data_90 %>%
@@ -332,7 +501,6 @@ corrplot(data_90_cor, method = 'number')
 correlation_matrix <- cor(model.matrix(model_90))
 
 # Визуализация тепловой карты
-library(ggplot2)
 
 melted_cor <- reshape2::melt(correlation_matrix)
 
@@ -343,24 +511,11 @@ ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value)) +
   labs(title = "Матрица корреляций", fill = "Коэффициент корреляции")
 ```
 
-```{r}
-correlation_matrix <- cor(model.matrix(model_180))
 
-# Визуализация тепловой карты
-
-melted_cor <- reshape2::melt(correlation_matrix)
-
-ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value)) +
-  geom_tile() +
-  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +  
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
-  labs(title = "Матрица корреляций", fill = "Коэффициент корреляции")
-```
-
-#LASSO 
-применяет L1-регуляризацию, которая добавляет штрафной член к функции потерь. Этот штраф уменьшает коэффициенты некоторых предикторов до нуля, эффективно исключая их из модели.
+#LASSO применяет L1-регуляризацию, которая добавляет штрафной член к функции потерь. Этот штраф уменьшает коэффициенты некоторых предикторов до нуля, эффективно исключая их из модели.
 
 ##90
+
 ```{r}
 
 # Подготовка данных: X - матрица предикторов, y - вектор отклика
@@ -383,6 +538,7 @@ coef(lasso_model_best)
 ```
 
 ##180
+
 ```{r}
 
 # Подготовка данных: X - матрица предикторов, y - вектор отклика
@@ -403,6 +559,7 @@ lasso_model_best <- glmnet(X, y, family = "binomial", alpha = 1, lambda = best_l
 coef(lasso_model_best)
 
 ```
+
 ##несколько попыток отобрать предикторы в модель, везде aliased coefficient
 
 ```{r}
@@ -414,13 +571,9 @@ summary(model_90_filter)
 
 ```
 
-
 ```{r}
 
 model_90_filter_2 <- glm(cGVHD_present ~ `4+ (IM STAT)` + `4NV(СТАР2)` + `4NV` + `4NV_TH17` + `4NV_Th17TO1` + `4NV_TH2` + `4NV+226+` + `4NV+PD-1-TIGIT-` + `4NV+TIGIT+` + `4ЕМ_TH1` + `4ЕМ_TH17` + `4ЕМ_Th17TO1` + `4СМ` + `4СМ_TH22` + `4ТЕ+PD-1+TIGIT-` + `8+ (IM STAT)` + `8+` + `8+DR+` + `8+PD-1+` + `8+PD-1+TIGIT+` + `8+TIGIT+` + `8EMTM` + `8EMTM+226+` + `8EMTM+39+` + `8EMTM+DR+` + `8EMTM+PD-1+` +  `8EMTM+PD-1+TIGIT-` + `8EMTM+PD-1+TIGIT+` + `8EMTM+PD-1-TIGIT+` + `8EMTM+TIGIT+` + `8NV` + `8TREG` + `8ТЕ(СТАР2)` + `8ТЕ+226+` + `8ТЕ+DR+` + `8ТЕ+PD-1+` + `8ТЕ+PD-1+TIGIT+` + `8ТМ`, data = data_90, family = binomial)                          
-                
-
-                         
 ```
 
 ```{r}
@@ -439,7 +592,7 @@ summary(model_90_filter_2)
 correlation_matrix <- cor(data_90_num, method = "spearman")
 
 # Иерархическая кластеризация
-cor_hclust <- hclust(dist(1-correlation_matrix), method = "complete")
+cor_hclust <- hclust(dist((1-correlation_matrix)), method = "complete")
 
 # Создание тепловой карты 
 pheatmap(
@@ -447,7 +600,7 @@ pheatmap(
   cluster_rows = cor_hclust,
   cluster_cols = cor_hclust,
   color = colorRampPalette(c("blue", "white", "red"))(100),
-  main = "Корреляционная матрица числовых переменных",
+  main = "Корреляционная матрица",
   annotation_col = NULL,
   annotation_row = NULL,
   fontsize = 10
@@ -473,6 +626,7 @@ plot(k.values, SSE, type = "b", xlab = "Число кластеров", ylab = "
      main = "Метод локтя")
 lines(k.values, SSE, col = "red")
 ```
+
 ```{r}
 library(cluster)
 
@@ -605,7 +759,6 @@ pheatmap(
 )
 ```
 
-
 ```{r}
 cluster_9_matrix <- correlation_matrix[cluster_9_vars, cluster_9_vars]
 
@@ -708,7 +861,7 @@ pheatmap(
 )
 ```
 
-# Модель по результатам heat map, 90 день
+# Модель по результатам heat map (отобранные предикторы), 90 день
 
 ```{r}
 
@@ -718,6 +871,7 @@ model_90_filter_finish <- glm(cGVHD_present ~ `4СМ_TH1` + `4_TH22`+ `TREG+PD-1
 summary(model_90_filter_finish)
 
 ```
+
 ##Корреляции в model_90_filter_finish
 
 ```{r}
@@ -736,9 +890,8 @@ corrplot(data_90_num_model_cor, method = 'number')
 
 ##Диагностика model_90_filter_finish 90 день
 
-**Проверка формы зависимости логита от $X$ на линейность**:
+**Проверка формы зависимости логита от** $X$ на линейность:
 
-- Проще всего это сделать, построив график для эмпирического `logit` vs $X$ и визуально оценить возможную нелинейность по $X$:
 
 ```{r}
 df_check <- model_90_filter_finish %>% broom::augment() %>% 
@@ -762,12 +915,13 @@ car::vif(model_90_filter_finish)
 ```
 
 **Выбросы**
+
 ```{r, fig.width=8, fig.height=4}
 
 resid_panel(model_90_filter_finish, plots = c("lev", "cookd"))
 ```
 
-# Модель по результатам heat map, 180 день
+# Модель по результатам heat map (отобранные предикторы), 180 день
 
 ```{r}
 
@@ -791,6 +945,128 @@ ggplot() +
   theme_bw()
 ```
 
+
+#Множественный регрессионный анализ, поправка на множественное сравнение, Forrest plot и Vulcano plot
+
+```{r}
+
+# Копируем данные для переименования
+data_90_copy <- data_90
+
+# Функция для безопасных имен переменных
+make_safe_names <- function(names) {
+  # Заменяем недопустимые символы на '_'
+  safe_names <- make.names(names, unique = TRUE)
+  return(safe_names)
+}
+
+# Функция для выполнения регрессии и коррекции p-значений
+perform_multiple_regression <- function(data) {
+  # Находим числовые колонки, исключая целевую
+  numeric_cols <- names(data)[sapply(data, is.numeric) & names(data) != "cGVHD_present"]
+  
+  # Создаем копию данных с безопасными именами
+  data_safe <- data
+  names(data_safe) <- make_safe_names(names(data))
+  
+  # Обновляем список числовых колонок с безопасными именами
+  numeric_cols_safe <- make_safe_names(numeric_cols)
+  
+  # Список для хранения результатов
+  regression_results <- list()
+  
+  # Цикл по всем числовым переменным
+  for (i in seq_along(numeric_cols_safe)) {
+    col <- numeric_cols_safe[i]
+    original_col <- numeric_cols[i]
+    
+    formula <- as.formula(paste("cGVHD_present ~", col))
+    model <- glm(formula, data = data_safe, family = binomial())
+    
+    # Извлечение результатов
+    tidy_model <- tidy(model, conf.int = TRUE)
+    tidy_model$original_variable <- original_col
+    regression_results[[original_col]] <- tidy_model
+  }
+  
+  # Коррекция p-значений методом Бенджамини-Хохберга
+  p_values <- sapply(regression_results, function(x) x$p.value[2])
+  adjusted_p_values <- p.adjust(p_values, method = "BH")
+  
+  # Обновление результатов скорректированными p-значениями
+  for (i in seq_along(regression_results)) {
+    regression_results[[names(regression_results)[i]]]$p.adj <- adjusted_p_values[i]
+  }
+  
+  return(regression_results)
+}
+
+# Выполнение регрессионного анализа
+results <- perform_multiple_regression(data_90_copy)
+
+# Подготовка данных для Forest Plot
+forest_data <- do.call(rbind, lapply(names(results), function(col) {
+  res <- results[[col]]
+  data.frame(
+    variable = col,
+    estimate = res$estimate[2],
+    conf.low = res$conf.low[2],
+    conf.high = res$conf.high[2],
+    p.adj = res$p.adj[2]
+  )
+}))
+
+# Forest Plot
+forest_plot_1 <- ggplot(forest_data, aes(y = reorder(variable, estimate), x = estimate)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Forest Plot of Regression Coefficients", 
+       x = "Coefficient Estimate", 
+       y = "Variables") +
+  theme(axis.text.x = element_blank()) + #убрали текст с вертикальной оси после coord_flip()
+   scale_x_continuous(limits = c(-75, 25)) +
+    coord_flip()
+
+forest_plot_2 <- ggplot(forest_data, aes(y = reorder(variable, estimate), x = estimate, color = p.adj < 0.05)) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.1) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Forest Plot of Regression Coefficients (p-adjust)", 
+       x = "Coefficient Estimate", 
+       y = "Variables") +
+  theme(axis.text.x = element_blank()) +
+  scale_x_continuous(limits = c(-75, 50)) +
+  coord_flip() +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "black"))
+
+
+# Volcano Plot 
+volcano_plot <- ggplot(forest_data, aes(x = estimate, y = -log10(p.adj))) +
+  geom_point(aes(color = p.adj < 0.05)) +
+  geom_text_repel(aes(label = variable),
+                  box.padding = 0.5,
+                  max.overlaps = Inf,
+                  size = 2,
+                  segment.size = 0.2,
+                   segment.linetype = "solid",
+                   segment.alpha = 0.5) + # Управляем толщиной линий
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "black")) +
+  theme_minimal() +
+  labs(title = "Volcano Plot",
+       x = "Coefficient Estimate",
+       y = "-log10(Adjusted p-value)") +
+  scale_x_continuous(limits = c(-20, 8)) +
+   scale_y_continuous(limits = c(0, 0.18))
+
+# Вывод результатов
+print(forest_data)
+forest_plot_1
+forest_plot_2
+volcano_plot
+```
 
 
 
