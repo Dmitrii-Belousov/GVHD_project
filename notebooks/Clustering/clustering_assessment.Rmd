@@ -29,7 +29,6 @@ library(randomForest)
 library(caret)
 library(pROC)
 
-
 set.seed(42)
 ```
 
@@ -1078,12 +1077,12 @@ print(top_features_all)
 top_feature_names <- unique(unlist(lapply(top_features_all, names)))
 W_top <- W[top_feature_names, ] 
 
-pheatmap::pheatmap(t(W_top), 
+pheatmap::pheatmap(W_top, 
                    cellwidth = 10, 
                    cellheight = 8, 
                    cluster_rows = F,
                    show_rownames = T,
-                   cluster_cols = T, 
+                   cluster_cols = F, 
                    border_color = NA, 
                    scale = "row")
 ```
@@ -1269,6 +1268,21 @@ data_filtered_t <- data_filtered %>%
   t() %>% 
   as.data.frame()
 ```
+
+```{r}
+ds_cfs_cc <- cbind(data_filtered_t[rownames(cc),], cc) %>% 
+  mutate(
+    RiskGroup = as.factor(case_when(
+      consensus %in% c(1, 2, 3) ~ "Low Risk",
+      #consensus %in% c(3) ~ "Medium Risk",
+      consensus %in% c(4) ~ "High Risk"
+    ))
+  ) %>% 
+  mutate(RiskGroup = factor(RiskGroup, levels = c("High Risk", "Low Risk")))
+```
+
+
+
 
 ```{r, fig.height=5}
 ds_cfs <- data %>% 
@@ -1461,6 +1475,11 @@ names(top_features_all) <- paste0("Cluster_", 1:ncol(W))
 print(top_features_all)
 
 ```
+
+```{r}
+W
+```
+
 
 ```{r}
 W %>% write.csv("~/GVHD_project/data/W_nmf.csv")
@@ -1725,7 +1744,7 @@ ggcoxdiagnostics(cox_model, type = "deviance", ggtheme = theme_bw())
 
 ```{r}
 ds_cfs_cc %>% 
-  select(where(is.numeric), -c(consensus, ID, Event, Time_CFS, RiskGroup)) -> X
+  select(where(is.numeric), -c(RiskGroup, consensus)) -> X
 
 y <- ds_cfs_cc %>% select(RiskGroup) %>% mutate(RiskGroup = as.factor(RiskGroup)) %>% pull(RiskGroup)
   
@@ -1801,11 +1820,70 @@ rf_gridsearch <- train(Event ~ .,
 print(rf_gridsearch)
 ```
 
+```{r}
+train(Event ~ ., data = train_ds, method = 'ranger')
+```
+
+```{r}
+set.seed(42)
+
+model <- ranger::ranger(dependent.variable.name = "Event", 
+                        #probability = TRUE,
+                        data = train_ds, 
+                        num.trees = 100, 
+                        mtry = 2,
+                        splitrule = "gini")
+
+model_pb <- ranger::ranger(dependent.variable.name = "Event", 
+                        probability = TRUE,
+                        data = train_ds, 
+                        num.trees = 100, 
+                        mtry = 2,
+                        splitrule = "gini")
 
 
 
+preds <- predict(model, data = X_test)$predictions
+accuracy <- mean(preds == y_test)
 
+confusionMatrix(preds, y_test)
+```
 
+```{r, fig.height=7, fig.width=7}
+probs <- predict(model_pb, X_test)$predictions
+roc_obj <- roc(y_test, probs[,1])
+
+optimal_coords <- coords(
+  roc_obj, 
+  "best", 
+  ret = c("threshold", "sensitivity", "specificity"),
+  best.method = "youden"
+)
+
+optimal_coords
+  
+plot.roc(roc_obj, print.thres = "best", 
+         print.thres.best.method = "youden", 
+         col = "blue", xlim = c(1, 0))
+```
+
+```{r, fig.height=7, fig.width=7}
+probs <- predict(model_pb, X)$predictions
+roc_obj <- roc(y, probs[,1])
+
+optimal_coords <- coords(
+  roc_obj, 
+  "best", 
+  ret = c("threshold", "sensitivity", "specificity"),
+  best.method = "youden"
+)
+
+optimal_coords
+  
+plot.roc(roc_obj, print.thres = "best", 
+         print.thres.best.method = "youden", 
+         col = "blue", xlim = c(1, 0))
+```
 
 
 
