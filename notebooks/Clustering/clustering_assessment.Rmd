@@ -25,6 +25,9 @@ library(fpc)
 library(factoextra)
 library(rstatix)
 library(corrplot)
+library(randomForest)
+library(caret)
+library(pROC)
 
 set.seed(42)
 ```
@@ -85,13 +88,13 @@ res <- data_subset %>%
 
 res %>% 
   factoextra::fviz_dend(cex = 0.2, 
-            k = 3, 
+            k = 2, 
             k_colors = "jco")
 ```
 
 ```{r, fig.height=10, fig.width=25}
 labels <- res %>% 
-  cutree(k = 3)
+  cutree(k = 4)
 
 data_subset_sorted <- data_subset %>% 
   mutate(labels = labels) %>% 
@@ -121,7 +124,7 @@ data_subset_sorted %>%
 ### Sillhouette
 
 ```{r}
-sil <- silhouette(res %>% cutree(k = 3), 
+sil <- silhouette(res %>% cutree(k = 4), 
                   data_subset %>% dist(method = "euclidean"))
 fviz_silhouette(sil) +
   theme_bw()
@@ -204,6 +207,45 @@ ggsurvplot(fit,
            pval.coord = c(650, 0.7))         
 ```
 
+```{r}
+merged <- merged %>% 
+  mutate(
+    RiskGroup = as.factor(case_when(
+      labels %in% c(3) ~ "Low Risk",
+      #labels %in% c(5) ~ "Medium Risk",
+      labels %in% c(1, 2, 4) ~ "High Risk"
+    ))
+  ) %>% 
+  mutate(RiskGroup = factor(RiskGroup, levels = c("High Risk", "Low Risk")))
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ RiskGroup, data = merged)
+
+risk_palette <- c(
+  "High Risk" = "#B25372",
+  "Medium Risk" = "#A26A27",
+  "Low Risk" = "#00926C"
+)
+
+sp <- ggsurvplot(fit, 
+           data = merged,
+           title = "Risk groups survival",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.375,
+           pval = TRUE,
+           fun = "event",
+           xlab = "Time, days",
+           ylim = c(0, 1),
+           color = "RiskGroup",
+           palette = risk_palette,
+           pval.coord = c(0, 0.99)) 
+
+sp
+```
+
+
 ## Cluster characteristics
 
 ```{r}
@@ -240,7 +282,7 @@ for (i in c(1:n_distinct(data_subset_cc$consensus))) {
 }
 ```
 
-```{r, fig.width=10, fig.height = 4}
+```{r, fig.width=7, fig.height = 7}
 library(cowplot)
 
 plot_MD <- function(data){
@@ -249,8 +291,19 @@ plot_MD <- function(data){
     filter(Padj < 0.05) %>% 
     arrange(desc(abs(MeanDiff))) %>% 
     slice_head(n = 10) %>% 
-    arrange(desc(MeanDiff)) %>% 
-    mutate(position = seq(10, 1)) 
+    arrange(desc(MeanDiff)) 
+  
+  if (nrow(d) > 0) {
+    d$position = seq(nrow(d), 1)
+  } else {
+    return(
+      ggplot() +
+        annotate("text", 
+                 x = 3, y = 6, label = "No Sign. Features", 
+                 size = 5, color = "red") +
+        theme_bw()
+    )
+  }
   
   min <- min(d$MeanDiff)
   max <- max(d$MeanDiff)
@@ -267,7 +320,7 @@ plot_MD <- function(data){
   return(p)
 }
 
-plot_grid(plotlist = lapply(stats, plot_MD), ncol=3)
+plot_grid(plotlist = lapply(stats, plot_MD))
 ```
 
 
@@ -425,6 +478,43 @@ ggsurvplot(fit,
            pval.coord = c(650, 0.7)) 
 ```
 
+```{r}
+merged <- merged %>% 
+  mutate(
+    RiskGroup = as.factor(case_when(
+      labels %in% c(1) ~ "Low Risk",
+      labels %in% c(2, 3) ~ "Medium Risk",
+      labels %in% c(4) ~ "High Risk"
+    ))
+  ) %>% 
+  mutate(RiskGroup = factor(RiskGroup, levels = c("High Risk", "Medium Risk", "Low Risk")))
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ RiskGroup, data = merged)
+
+risk_palette <- c(
+  "High Risk" = "#B25372",
+  "Medium Risk" = "#A26A27",
+  "Low Risk" = "#00926C"
+)
+
+sp <- ggsurvplot(fit, 
+           data = merged,
+           title = "Risk groups survival",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.375,
+           pval = TRUE,
+           fun = "event",
+           xlab = "Time, days",
+           ylim = c(0, 1),
+           color = "RiskGroup",
+           palette = risk_palette,
+           pval.coord = c(0, 0.99)) 
+
+sp
+```
 
 ## Cluster characteristics
 
@@ -699,6 +789,43 @@ ggsurvplot(fit,
            pval.coord = c(650, 0.7)) 
 ```
 
+```{r}
+merged <- merged %>% 
+  mutate(
+    RiskGroup = as.factor(case_when(
+      labels %in% c(1) ~ "Low Risk",
+      labels %in% c(2, 4) ~ "Medium Risk",
+      labels %in% c(3) ~ "High Risk"
+    ))
+  ) %>% 
+  mutate(RiskGroup = factor(RiskGroup, levels = c("High Risk", "Medium Risk", "Low Risk")))
+
+surv_object <- Surv(time = as.numeric(merged$Time_CFS), event = merged$Event)
+
+fit <- survfit(surv_object ~ RiskGroup, data = merged)
+
+risk_palette <- c(
+  "High Risk" = "#B25372",
+  "Medium Risk" = "#A26A27",
+  "Low Risk" = "#00926C"
+)
+
+sp <- ggsurvplot(fit, 
+           data = merged,
+           title = "Risk groups survival",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.375,
+           pval = TRUE,
+           fun = "event",
+           xlab = "Time, days",
+           ylim = c(0, 1),
+           color = "RiskGroup",
+           palette = risk_palette,
+           pval.coord = c(0, 0.99)) 
+
+sp
+```
 
 ### Cluster characteristics
 
@@ -808,7 +935,7 @@ data %>%
   select(everything(), -c(ID, Time_OS, Time_CFS, cGVHD_time, cGVHD_day, 
                           Collection_Day, Source, cGVHD_time_discrete, 
                           Collection_time, Post_cGVHD_time)) %>% 
-  mutate(across(-Event, log1p), 
+  mutate(#across(-Event, log1p), 
          across(-Event, normalize), 
          Event = as.factor(Event)) -> data_filtered
 
@@ -853,7 +980,7 @@ plot(estim.r)
 ### Cluster Stability 
 
 ```{r}
-NMFclustering <- function(data_matrix, k = 5) {
+NMFclustering <- function(data_matrix, k = 4) {
   res <- nmf(t(data_matrix), k, nrun=100, seed=42)
   clusters <- predict(res)
   if (!is.factor(clusters)) {
@@ -893,7 +1020,7 @@ print(cpx)
 ```
 
 ```{r fig.height=5, fig.width=8}
-res <- nmf(data_filtered, 5, nrun=100, seed=42)
+res <- nmf(data_filtered, 4, nrun=100, seed=42)
 
 layout(cbind(1,2))
 basismap(res)
@@ -936,7 +1063,7 @@ pheatmap::pheatmap(res@consensus[order, order],
 
 ```{r}
 W <- res@fit@W
-colnames(W) <- c(1:5)
+colnames(W) <- c(1:4)
 top_features_all <- lapply(1:ncol(W), function(cluster) {
   sort(W[, cluster], decreasing = TRUE)[1:10]
 })
@@ -950,12 +1077,12 @@ print(top_features_all)
 top_feature_names <- unique(unlist(lapply(top_features_all, names)))
 W_top <- W[top_feature_names, ] 
 
-pheatmap::pheatmap(t(W_top), 
+pheatmap::pheatmap(W_top, 
                    cellwidth = 10, 
                    cellheight = 8, 
                    cluster_rows = F,
                    show_rownames = T,
-                   cluster_cols = T, 
+                   cluster_cols = F, 
                    border_color = NA, 
                    scale = "row")
 ```
@@ -1042,6 +1169,187 @@ plot_LFC <- function(data){
 }
 
 plot_grid(plotlist = lapply(stats, plot_LFC))
+```
+
+```{r, fig.height=5, fig.width=8}
+
+library(ggrepel)
+
+diff <- stats$`1 vs. all` %>% 
+  mutate(DE = ifelse((Padj <= .05 & abs(LFC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & LFC > .6) ~ "UP",
+           (DE & LFC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = rownames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=LFC, y=-log10(Padj), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
+
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`2 vs. all` %>% 
+  mutate(DE = ifelse((Padj <= .05 & abs(LFC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & LFC > .6) ~ "UP",
+           (DE & LFC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = rownames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=LFC, y=-log10(Padj), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
+
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`3 vs. all` %>% 
+  mutate(DE = ifelse((Padj <= .05 & abs(LFC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & LFC > .6) ~ "UP",
+           (DE & LFC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = rownames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=LFC, y=-log10(Padj), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
+
+```{r, fig.height=5, fig.width=8}
+diff <- stats$`4 vs. all` %>% 
+  mutate(DE = ifelse((Padj <= .05 & abs(LFC) > 0.6), TRUE, FALSE), 
+         DE_dir = case_when(
+           (DE & LFC > .6) ~ "UP",
+           (DE & LFC < -.6) ~ "DOWN",
+           TRUE ~ "NO"
+         ),
+         labels = rownames(stats$`1 vs. all`),
+         delabel = ifelse(DE, labels, NA))
+
+
+ggplot(data=diff, 
+       aes(x=LFC, y=-log10(Padj), col=DE_dir, label=delabel)) +
+        geom_point() + 
+        theme_minimal() +
+        geom_text_repel() +
+        scale_color_manual(values=c("#304289", "#898889", "#893056")) +
+        geom_vline(xintercept=c(-0.6, 0.6), linetype = "dashed", col="#725D8B") +
+        geom_hline(yintercept=-log10(0.05), linetype = "dashed", col="#725D8B")
+```
+
+
+```{r}
+data_filtered_t <- data_filtered %>% 
+  t() %>% 
+  as.data.frame()
+```
+
+```{r}
+ds_cfs_cc <- cbind(data_filtered_t[rownames(cc),], cc) %>% 
+  mutate(
+    RiskGroup = as.factor(case_when(
+      consensus %in% c(1, 2, 3) ~ "Low Risk",
+      #consensus %in% c(3) ~ "Medium Risk",
+      consensus %in% c(4) ~ "High Risk"
+    ))
+  ) %>% 
+  mutate(RiskGroup = factor(RiskGroup, levels = c("High Risk", "Low Risk")))
+```
+
+
+
+
+```{r, fig.height=5}
+ds_cfs <- data %>% 
+  filter(is.na(cGVHD_day) 
+         & !is.na(Collection_time) 
+         & Collection_Day %in% c("90") 
+         & Collection_time != "Post") %>% 
+  select(c(ID, Time_CFS, Event)) %>% 
+  as.data.frame()
+
+rownames(ds_cfs) <- rownames(data_filtered_t)
+
+ds_cfs_cc <- cbind(ds_cfs[rownames(cc),], cc) %>% filter(consensus != 7)
+
+#ds_cfs_cc = ds_cfs_cc %>% filter(Event == 1) %>% filter(!(consensus %in% c(4, 6)))
+
+surv_object <- Surv(time = as.numeric(ds_cfs_cc$Time_CFS), event = ds_cfs_cc$Event)
+
+fit <- survfit(surv_object ~ consensus, data = ds_cfs_cc)
+
+ggsurvplot(fit, 
+           data = ds_cfs_cc,
+           title = "Cluster survival curves",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.375,
+           pval = TRUE,
+           #xlim = c(0, 365),
+           pval.coord = c(300, 0.99)) 
+```
+
+```{r}
+ds_cfs_cc <- ds_cfs_cc %>% 
+  mutate(
+    RiskGroup = as.factor(case_when(
+      consensus %in% c(1, 2, 3) ~ "Low Risk",
+      #consensus %in% c(3) ~ "Medium Risk",
+      consensus %in% c(4) ~ "High Risk"
+    ))
+  ) %>% 
+  mutate(RiskGroup = factor(RiskGroup, levels = c("High Risk", "Low Risk")))
+
+surv_object <- Surv(time = as.numeric(ds_cfs_cc$Time_CFS), event = ds_cfs_cc$Event)
+
+fit <- survfit(surv_object ~ RiskGroup, data = ds_cfs_cc)
+
+risk_palette <- c(
+  "High Risk" = "#B25372",
+  "Medium Risk" = "#A26A27",
+  "Low Risk" = "#00926C"
+)
+
+sp <- ggsurvplot(fit, 
+           data = ds_cfs_cc,
+           title = "Risk groups survival",
+           conf.int	= FALSE,        
+           risk.table = TRUE,
+           tables.height = 0.375,
+           pval = TRUE,
+           fun = "event",
+           xlab = "Time, days",
+           ylim = c(0, 1),
+           color = "RiskGroup",
+           palette = risk_palette,
+           pval.coord = c(0, 0.99)) 
+
+sp
 ```
 
 ## NMF (log)
@@ -1169,6 +1477,11 @@ print(top_features_all)
 ```
 
 ```{r}
+W
+```
+
+
+```{r}
 W %>% write.csv("~/GVHD_project/data/W_nmf.csv")
 ```
 
@@ -1274,6 +1587,9 @@ plot_grid(plotlist = lapply(stats, plot_LFC))
 
 ### Survival
 
+
+
+
 ```{r}
 data_filtered_t <- data_filtered %>% 
   t() %>% 
@@ -1309,6 +1625,14 @@ ggsurvplot(fit,
            #xlim = c(0, 365),
            pval.coord = c(300, 0.99)) 
 ```
+
+```{r}
+ds_cfs_cc <- read.csv("../../data/data_subset_clustered_nmf.csv", 
+                        row.names = 1)
+
+ds_cfs_cc %>% head()
+```
+
 
 ```{r}
 ds_cfs_cc <- ds_cfs_cc %>% 
@@ -1416,20 +1740,150 @@ ggcoxdiagnostics(cox_model, type = "dfbetas", ggtheme = theme_bw())
 ggcoxdiagnostics(cox_model, type = "deviance", ggtheme = theme_bw()) 
 ```
 
-# Feature Selection + Clustering
+# Predictor
+
+```{r}
+ds_cfs_cc %>% 
+  select(where(is.numeric), -c(RiskGroup, consensus)) -> X
+
+y <- ds_cfs_cc %>% select(RiskGroup) %>% mutate(RiskGroup = as.factor(RiskGroup)) %>% pull(RiskGroup)
+  
+```
+
+```{r, fig.height=7, fig.width=12}
+set.seed(42)
+
+train_index <- createDataPartition(y,
+                                   p = 0.8,
+                                   list = FALSE,
+                                   times = 1)
+
+X_train <- X[train_index,]
+X_test <- X[-train_index,]
+
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+rf_model_1 <- randomForest(x = X_train, 
+                           y = y_train, 
+                           importance = TRUE, 
+                           ntree = 30, 
+                           nodesize = 5)
+varImpPlot(rf_model_1)
+```
+
+```{r}
+preds <- predict(rf_model_1, X_test, 
+                 # type="prob"
+                 )
+confusionMatrix(preds, y_test)
+```
+
+```{r}
+probs <- predict(rf_model_1, X_test, type="prob")
+roc_obj <- roc(y_test, probs[,1])
+
+optimal_coords <- coords(
+  roc_obj, 
+  "best", 
+  ret = c("threshold", "sensitivity", "specificity"),
+  best.method = "youden"
+)
+
+optimal_coords
+  
+plot.roc(roc_obj, print.thres = "best", print.thres.best.method = "youden", col = "blue")
+```
+```{r}
+set.seed(42)
+
+rf_control <- trainControl(method = "LOOCV", 
+                            search = "grid", 
+                            verboseIter = T, 
+                            #number = 3,
+                            #sampling = "up"
+                           )
+
+rf_grid <- expand.grid(mtry = length(X_train),
+                       splitrule = c("gini", "extratrees"),
+                       min.node.size = c(1, 3, 5, 10, 12, 15, 20))
+
+train_ds <- X_train %>% 
+  mutate(Event = y_train)
+
+rf_gridsearch <- train(Event ~ ., 
+                       data = train_ds,
+                       method = 'ranger',
+                       metric = 'Accuracy',
+                       tuneGrid = rf_grid)
+
+print(rf_gridsearch)
+```
+
+```{r}
+train(Event ~ ., data = train_ds, method = 'ranger')
+```
+
+```{r}
+set.seed(42)
+
+model <- ranger::ranger(dependent.variable.name = "Event", 
+                        #probability = TRUE,
+                        data = train_ds, 
+                        num.trees = 100, 
+                        mtry = 2,
+                        splitrule = "gini")
+
+model_pb <- ranger::ranger(dependent.variable.name = "Event", 
+                        probability = TRUE,
+                        data = train_ds, 
+                        num.trees = 100, 
+                        mtry = 2,
+                        splitrule = "gini")
 
 
 
+preds <- predict(model, data = X_test)$predictions
+accuracy <- mean(preds == y_test)
 
+confusionMatrix(preds, y_test)
+```
 
+```{r, fig.height=7, fig.width=7}
+probs <- predict(model_pb, X_test)$predictions
+roc_obj <- roc(y_test, probs[,1])
 
+optimal_coords <- coords(
+  roc_obj, 
+  "best", 
+  ret = c("threshold", "sensitivity", "specificity"),
+  best.method = "youden"
+)
 
+optimal_coords
+  
+plot.roc(roc_obj, print.thres = "best", 
+         print.thres.best.method = "youden", 
+         col = "blue", xlim = c(1, 0))
+```
 
+```{r, fig.height=7, fig.width=7}
+probs <- predict(model_pb, X)$predictions
+roc_obj <- roc(y, probs[,1])
 
+optimal_coords <- coords(
+  roc_obj, 
+  "best", 
+  ret = c("threshold", "sensitivity", "specificity"),
+  best.method = "youden"
+)
 
-
-
-
+optimal_coords
+  
+plot.roc(roc_obj, print.thres = "best", 
+         print.thres.best.method = "youden", 
+         col = "blue", xlim = c(1, 0))
+```
 
 
 
