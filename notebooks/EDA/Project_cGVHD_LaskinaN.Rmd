@@ -1044,7 +1044,7 @@ forest_plot_2 <- ggplot(forest_data, aes(y = reorder(variable, estimate), x = es
 
 
 # Volcano Plot 
-volcano_plot <- ggplot(forest_data, aes(x = estimate, y = -log10(p.adj))) +
+volcano_plot_1 <- ggplot(forest_data, aes(x = estimate, y = -log10(p.adj))) +
   geom_point(aes(color = p.adj < 0.05)) +
   geom_text_repel(aes(label = variable),
                   box.padding = 0.5,
@@ -1065,9 +1065,72 @@ volcano_plot <- ggplot(forest_data, aes(x = estimate, y = -log10(p.adj))) +
 print(forest_data)
 forest_plot_1
 forest_plot_2
-volcano_plot
+volcano_plot_1
+
+# Volcano Plot 
+volcano_plot_2 <- ggplot(forest_data, aes(x = estimate, y = -log10(p.adj))) +
+  # Добавляем прозрачность точкам через alpha
+  geom_point(aes(color = p.adj < 0.05), alpha = 0.5) +
+  # Добавляем условие для отображения подписей
+  geom_text_repel(data = subset(forest_data, estimate < -5 | estimate > 1),
+                  aes(label = variable),
+                  box.padding = 0.5,
+                  max.overlaps = Inf,
+                  size = 4,
+                  segment.size = 0.2,
+                  segment.linetype = "solid",
+                  segment.alpha = 0.5) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "black")) +
+  theme_minimal() +
+  labs(title = "Volcano Plot",
+       x = "Coefficient Estimate",
+       y = "-log10(Adjusted p-value)") +
+  scale_x_continuous(limits = c(-20, 8)) +
+  scale_y_continuous(limits = c(0, 0.18))
+
+volcano_plot_2
 ```
 
+```{r}
+volcano_plot_3 <- ggplot(forest_data, aes(x = estimate, y = -log10(p.adj))) +
+  # Добавляем логику для трех цветов на основе estimate
+  geom_point(aes(color = case_when(
+    estimate < -5 ~ "below_threshold",
+    estimate > 1 ~ "above_threshold",
+    TRUE ~ "within_threshold"
+  )),
+  size = 3,  
+  alpha = 0.7) + 
+  
+  # Добавляем подписи для выбросов
+  geom_text_repel(data = subset(forest_data, estimate < -5 | estimate > 1),
+                  aes(label = variable),
+                  box.padding = 0.5,
+                  max.overlaps = Inf,
+                  size = 4,
+                  segment.size = 0.2,
+                  segment.linetype = "solid",
+                  segment.alpha = 0.5) +
+  
+  # Применяем цветовую палитру 
+  scale_color_manual(
+    values = c(
+      "below_threshold" = "#304289",  # Синий для точек ниже -5
+      "above_threshold" = "#893056",  # Красный для точек выше 1
+      "within_threshold" = "#898889"  # Серый для точек между порогами
+    ),
+    guide = "none"  # Убираем легенду
+  ) +
+  
+  theme_minimal() +
+  labs(title = "Volcano Plot",
+       x = "Coefficient Estimate",
+       y = "-log10(Adjusted p-value)") +
+  scale_x_continuous(limits = c(-20, 8)) +
+  scale_y_continuous(limits = c(0, 0.18))
+
+volcano_plot_3
+```
 
 
 
