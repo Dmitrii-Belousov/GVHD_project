@@ -596,7 +596,7 @@ nmf_features <- c(
 )
 
 # Extract Boruta results
-boruta_features <- c("4СМ_TH2", "4СМ_TH22", "8EMTM+DR+", "8EMTM+PD-1+", "8EMTM+PD-1+TIGIT+", "8EMTM+TIGIT+", "8+", "8_EMTM", "8+226+")
+boruta_features <- c("4CM_TH2", "4CM_TH22", "8EMTM+DR+", "8EMTM+PD-1+", "8EMTM+PD-1+TIGIT+", "8EMTM+TIGIT+", "8+", "8EMTM", "8+226+")
 
 # Compare features
 shared_features <- intersect(nmf_features, boruta_features)  # Overlapping features
@@ -669,24 +669,25 @@ grid.newpage() # Clear the plotting window
 venn.plot <- venn.diagram(
   x = list(NMF = nmf_features, Boruta = rfs_features),
   category.names = c("NMF", "RFS"),
-  filename = NULL, # Do not save the diagram
-  fill = c("skyblue", "pink"), # Colors for NMF and Boruta
-  alpha = 0.5, # Transparency for circles
-  lty = "dashed", # Dashed borders for circles
-  cex = 1.5, # Adjust numbers' font size
-  cat.cex = 1.2, # Adjust labels' font size
+  filename = NULL, 
+  fill = c("skyblue", "pink"), 
+  alpha = 0.5, 
+  lty = "dashed",
+  cex = 1.5, 
+  cat.cex = 1.2, 
   main = "Feature Comparison: NMF vs RFS",
-  main.cex = 1.5, # Title font size
-  force.unique = TRUE # Prevent duplicate elements
+  main.cex = 1.5,
+  force.unique = TRUE
 )
 
 # Add the feature names inside the overlapping region
-shared_label <- paste(shared_features, collapse = "\n") # Combine shared features into one string
+shared_label <- paste(shared_features, collapse = "\n") 
+
 grid.text(
   shared_label,
-  x = 0.6, # Position at the center of the overlap
-  y = 0.7, # Adjust as needed
-  gp = gpar(fontsize = 10) # Font size for the labels
+  x = 0.6, 
+  y = 0.7,
+  gp = gpar(fontsize = 10) 
 )
 
 # Draw the diagram
@@ -926,12 +927,107 @@ ggplot(population_counts_long, aes(x = Population, y = Count, fill = Method)) +
 
 ```
 
-### 2.5.3.  NMF and Boruta Comparison by Cell Populations
+### 2.5.3.  High Risk cluster features and Boruta Comparison
 
-```{r NMF Boruta comparison}
-df <- read.csv("../../data/diff_pops.csv")
+```{r High Risk cluster features мы Boruta comparison}
+df <- read.csv("../../data/diff_pops.csv") %>%
+  filter(Padj <= .05 & abs(LFC) > 0.6)
 
+# Select names from X column
+df_features <- df %>% pull(X)
+
+print(df_features)
+# Compare features
+shared_features <- intersect(df_features, boruta_features)  # Overlapping features
+unique_to_nmf <- setdiff(df_features, boruta_features)      # Features unique to NMF
+unique_to_boruta <- setdiff(boruta_features, df_features)   # Features unique to Boruta
+
+# Print results
+cat("Shared Features:\n", shared_features, "\n\n")
+cat("Features Unique to NMF:\n", unique_to_nmf, "\n\n")
+cat("Features Unique to Boruta:\n", unique_to_boruta, "\n\n")
+
+# Generate Venn diagram and include feature names in the overlap
+grid.newpage() # Clear the plotting window
+venn.plot <- venn.diagram(
+  x = list(High_Risk = df_features, Boruta = boruta_features),
+  category.names = c("High risk", "Boruta"),
+  filename = NULL, 
+  fill = c("skyblue", "pink"),
+  alpha = 0.5,
+  lty = "dashed", 
+  cex = 1.5, 
+  cat.cex = 1.2, # Adjust labels' font size
+  main = "Feature Comparison: High Risk cluster features vs Boruta",
+  main.cex = 1.5, 
+  force.unique = TRUE 
+)
+
+# Add the feature names inside the overlapping region
+shared_label <- paste(shared_features, collapse = "\n") 
+grid.text(
+  shared_label,
+  x = 0.5,
+  y = 0.5, 
+  gp = gpar(fontsize = 10) 
+)
+
+# Draw the diagram
+grid.draw(venn.plot)
 ```
 
+### 2.5.4.  High Risk cluster features and RFS Comparison
+
+```{r High Risk vs RFS comparison}
+
+# Extract Boruta results
+rfs_features <- c(
+  "TREG_TE", "8EMTM+TIGIT+", "4NV_TH17TO1", "8EMTM+PD-1+TIGIT+",
+      "8EMTM+PD-1+", "8EMTM+DR+", "TREG+PD-1+",
+      "8TREG", "8+", "8+DR+", "4+TIGIT+", "4СМ_TH22", 
+  "4ТЕ+PD-1+TIGIT+",  "8+(IM STAT)", "8+226+", "8+PD-1-TIGIT-", 
+  "4ТM_TH2", "8EMTM", "8СМ+PD-1+TIGIT-", "4СМ(STAR2)"
+)
+
+# Compare features
+shared_features <- intersect(df_features, rfs_features)  # Overlapping features
+unique_to_nmf <- setdiff(df_features, rfs_features)      # Features unique to NMF
+unique_to_boruta <- setdiff(boruta_features, rfs_features)   # Features unique to Boruta
+
+# Print results
+cat("Shared Features:\n", shared_features, "\n\n")
+cat("Features Unique to NMF:\n", unique_to_nmf, "\n\n")
+cat("Features Unique to Boruta:\n", unique_to_boruta, "\n\n")
+
+# Generate Venn diagram and include feature names in the overlap
+grid.newpage() # Clear the plotting window
+venn.plot <- venn.diagram(
+  x = list(NMF = df_features, Boruta = rfs_features),
+  category.names = c("High risk", "RFS"),
+  filename = NULL, 
+  fill = c("skyblue", "pink"), 
+  alpha = 0.5, 
+  lty = "dashed",
+  cex = 1.5, 
+  cat.cex = 1.2, 
+  main = "Feature Comparison: High risk features vs RFS",
+  main.cex = 1.5,
+  force.unique = TRUE
+)
+
+# Add the feature names inside the overlapping region
+shared_label <- paste(shared_features, collapse = "\n") 
+
+grid.text(
+  shared_label,
+  x = 0.45, 
+  y = 0.5,
+  gp = gpar(fontsize = 10) 
+)
+
+# Draw the diagram
+grid.draw(venn.plot)
+
+```
 
 
