@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Регрессия Кокса
 
 ## Загрузка библиотек и данных
-```{r}
+```{r, echo=FALSE}
 library(tidyverse)
 library(survival)
 library(survminer)
@@ -24,9 +24,9 @@ library(dplyr)
 
 ## Чтение данных и разделение колонки
 
-```{r}
-#data <- read_excel("data/raw/AI_Tcells.xlsx", sheet = "Sheet1")
-data <- read.csv("raw_data/AI_Tcells_для ЕА - Sheet1.csv")
+```{r, echo=FALSE}
+data <- read.csv("../../raw_data/AI_Tcells_для ЕА - Sheet1.csv")
+
 # Разделение колонки "Names"
 data <- data %>%
   separate(Names, into = c("col", "Population"), sep = "/", extra = "merge") %>%
@@ -120,8 +120,8 @@ for (pop in unique(data180$Population)) {
   cox_results180[[pop]] <- summary(cox_model180)
 }
 
-head(cox_results90)
-head(cox_results180)
+#head(cox_results90)
+#head(cox_results180)
 ```
 
 ## Экстрагирование HR, CI и P-value
@@ -163,10 +163,10 @@ results180 <- extract_cox_results(cox_results180)
 Данная операция может быть необходима для наглядности графиков, так как у некоторых популяций слишком большой ДИ
 
 ```{r}
-#results90 <- results90 %>% filter(CI_upper < 2)
-#results180 <- results180 %>% filter(CI_upper < 2)
-#results90_filtered <- results90 %>% filter(CI_upper > 2)
-#results180_filtered <- results180 %>% filter(CI_upper > 2)
+results90 <- results90 %>% filter(CI_upper < 2)
+results180 <- results180 %>% filter(CI_upper < 2)
+results90_filtered <- results90 %>% filter(CI_upper > 2)
+results180_filtered <- results180 %>% filter(CI_upper > 2)
 #print(results90_filtered)
 #print(results180_filtered)
 ```
@@ -177,22 +177,24 @@ results180 <- extract_cox_results(cox_results180)
 ```{r, fig.height=7, fig.width=45}
 # Создаем функцию для визуализации с p.value
 plot_forest <- function(results, title) {
-  ggplot(results, aes(x = Population, y = HR)) +
+  results <- results %>% arrange(p_value) # Сортировка по p_value
+  ggplot(results, aes(x = reorder(Population, p_value), y = HR)) +
     # Точки: красные, если скорректированный p < 0.05
-    geom_point(aes(color = p_value < 0.05), size = 3) +
+    geom_point(aes(color = ifelse(p_value < 0.05, "p < 0.05", "p > 0.05")), size = 3) +
     # Линии доверительного интервала: красные, если p < 0.05
-    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, color = p_value < 0.05), width = 0.2) +       
-    geom_hline(yintercept = 1, linetype = "dashed", color = "red") +          
+    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, color = ifelse(p_value < 0.05, "p < 0.05", "p > 0.05")), width = 0.2) +       
+    geom_hline(yintercept = 1, linetype = "dashed", color = "red", linewidth = 1) +          
     geom_text(aes(label = round(p_value, 3)),                   
-              vjust = -1, size = 3, color = "black") +
+              vjust = -1, size = 5, color = "black") +
     labs(
       title = title,
-      x = "Популяция",
-      y = "Отношение рисков (HR) с 95% ДИ"
+      x = "Population",
+      y = "Hazard ration with 95% CI",
+      color = "Significance"  # Новая подпись для легенды
     ) +                                                            
-    theme_minimal() +                                                         
+    theme_bw() +                                                         
     theme(
-      text = element_text(size = 12),
+      text = element_text(size = 15),
       axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),         
       axis.text.y = element_text(size = 10),
       plot.title = element_text(hjust = 0.5)
@@ -200,12 +202,13 @@ plot_forest <- function(results, title) {
 }
 
 # Визуализация для 90 дней
-plot_forest(results90, title = "График для 90 дней")
+p1 <- plot_forest(results90, title = "Day 90 as starting point")
 
 # Визуализация для 180 дней
-plot_forest(results180, title = "График для 180 дней")
+p2 <- plot_forest(results180, title = "Day 180 as starting point")
 
-
+ggsave("Day 90 as starting point.png", plot = p1, width = 45, height = 7, dpi = 300)
+ggsave("Day 180 as starting point.png", plot = p2, width = 45, height = 7, dpi = 300)
 ```
 
 ## Визуализация с поправкой BH
@@ -213,22 +216,24 @@ plot_forest(results180, title = "График для 180 дней")
 ```{r, fig.height=7, fig.width=45}
 # Создаем функцию для визуализации с p.adj
 plot_forest_adj <- function(results, title) {
-  ggplot(results, aes(x = Population, y = HR)) +
+  results <- results %>% arrange(p_adj)  # Сортировка по p_adj
+  ggplot(results, aes(x = reorder(Population, p_adj), y = HR)) +
     # Точки: красные, если скорректированный p_adj < 0.05
-    geom_point(aes(color = p_adj < 0.05), size = 3) +
+    geom_point(aes(color = ifelse(p_value < 0.05, "p < 0.05", "p > 0.05")), size = 3) +
     # Линии доверительного интервала: красные, если p_adj < 0.05
-    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, color = p_adj < 0.05), width = 0.2) +       
-    geom_hline(yintercept = 1, linetype = "dashed", color = "red") +          
+    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, color = ifelse(p_value < 0.05, "p < 0.05", "p > 0.05")), width = 0.2) +       
+    geom_hline(yintercept = 1, linetype = "dashed", color = "red", linewidth = 1) +          
     geom_text(aes(label = round(p_adj, 3)),                   
               vjust = -1, size = 3, color = "black") +
     labs(
       title = title,
-      x = "Популяция",
-      y = "Отношение рисков (HR) с 95% ДИ"
+      x = "Cell population",
+      y = "Hazard ratio with 95% CI",
+      color = "Significance (with FDR)"  # Новая подпись для легенды
     ) +                                                            
-    theme_minimal() +                                                         
+    theme_bw() +                                                         
     theme(
-      text = element_text(size = 12),
+      text = element_text(size = 15),
       axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),         
       axis.text.y = element_text(size = 10),
       plot.title = element_text(hjust = 0.5)
@@ -236,13 +241,36 @@ plot_forest_adj <- function(results, title) {
 }
 
 # Визуализация для 90 дней с поправкой
-plot_forest_adj(results90, title = "График для 90 дней с поправкой")
+p3 <- plot_forest_adj(results90, title = "Day 90 as starting point")
 
 # Визуализация для 180 дней с поправкой
-plot_forest_adj(results180, title = "График для 180 дней с поправкой")
+p4 <- plot_forest_adj(results180, title = "Day 180 as starting point")
+
+ggsave("Day 90 as starting point.png", plot = p3, width = 45, height = 7, dpi = 500)
+ggsave("Day 180 as starting point.png", plot = p4, width = 45, height = 7, dpi = 500)
 ```
 
-Сравнение полученных результатов
+## Вывод топ 5 популяций
+
+```{r}
+top5_results90 <- results90 %>% arrange(p_value) %>% head(5)
+top5_results180 <- results180 %>% arrange(p_value) %>% head(5)
+
+# График для 90 дней
+p5 <- plot_forest(top5_results90, title = "Top 5 with day 90 as starting point")
+p6 <- plot_forest_adj(top5_results90, title = "Top 5 with day 90 as starting point with FDR")
+
+# График для 180 дней
+p7 <- plot_forest(top5_results180, title = "Top 5 with day 180 as starting point")
+p8 <- plot_forest_adj(top5_results180, title = "Top 5 with day 180 as starting point with FDR")
+ggsave("Top 5 with day 90 as starting point.png", plot = p5, width = 10, height = 7, dpi = 300)
+ggsave("Top 5 with day 90 as starting point with FDR.png", plot = p6, width = 10, height = 7, dpi = 300)
+ggsave("Top 5 with day 180 as starting point.png", plot = p7, width = 10, height = 7, dpi = 300)
+ggsave("Top 5 with day 180 as starting point with FDR.png", plot = p8, width = 10, height = 7, dpi = 300)
+```
+
+
+## Сравнение полученных результатов
 
 ```{r}
 significant90 <- results90 %>% 
@@ -255,4 +283,13 @@ print(significant90)
 print(significant180)
 ```
 
+```{r}
+results90 %>% 
+  ggplot(aes(x = HR, y = (CI_upper-CI_lower)))+
+  geom_point()+
+  geom_vline(xintercept = 0.9, linetype = "dashed", color = "blue")+
+  geom_vline(xintercept = 1.1, linetype = "dashed", color = "blue") +
+  geom_hline(yintercept = 0.3, linetype = "dashed", color = "red")
+
+```
 
