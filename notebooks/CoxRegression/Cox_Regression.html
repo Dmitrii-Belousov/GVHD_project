@@ -551,9 +551,9 @@ plot_forest_adj &lt;- function(results, title) {
   results &lt;- results %&gt;% arrange(p_adj)  # Сортировка по p_adj
   ggplot(results, aes(x = reorder(Population, p_adj), y = HR)) +
     # Точки: красные, если скорректированный p_adj &lt; 0.05
-    geom_point(aes(color = ifelse(p_value &lt; 0.05, &quot;p &lt; 0.05&quot;, &quot;p &gt; 0.05&quot;)), size = 3) +
+    geom_point(aes(color = ifelse(p_adj &lt; 0.05, &quot;p &lt; 0.05&quot;, &quot;p &gt; 0.05&quot;)), size = 3) +
     # Линии доверительного интервала: красные, если p_adj &lt; 0.05
-    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, color = ifelse(p_value &lt; 0.05, &quot;p &lt; 0.05&quot;, &quot;p &gt; 0.05&quot;)), width = 0.2) +       
+    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, color = ifelse(p_adj &lt; 0.05, &quot;p &lt; 0.05&quot;, &quot;p &gt; 0.05&quot;)), width = 0.2) +       
     geom_hline(yintercept = 1, linetype = &quot;dashed&quot;, color = &quot;red&quot;, linewidth = 1) +          
     geom_text(aes(label = round(p_adj, 3)),                   
               vjust = -1, size = 3, color = &quot;black&quot;) +
