@@ -34,7 +34,7 @@ The project is carried out by team 6 of the 2024/25 Biostatistics program of the
 ### Options for further developments:
 - **Cure**: The immune system recovers faster than the tumor develops.
 - **Tumor recurrence**: The immune system recovers more slowly than the tumor develops.
-- **Graft versus host reaction (GVR) **: Dysregulation of the immune system resulting in the attack of donor immune cells on recipient tissue.
+- **Graft versus host reaction (GVR)**: Dysregulation of the immune system resulting in the attack of donor immune cells on recipient tissue.
 
 ### Pathogenesis of chronic RTPX:
 1. **Tissue damage and inflammation**: Occur as a result of conditioning and acute RTPX.
@@ -76,10 +76,13 @@ Tx expressing CD226 exhibit an active immune response. Expression of CD226 on Tr
 - High cGVHD Risk cluster was shown to be associated with naive T cells populations enrichment and lower counts of effector memory compartment;
 - BORUTA and RFS confirm effector memory T cells to be strong predictors of cGVHD;
 
-![High risk cluster is associated with naïve T cells enrichment](High risk cluster.png)
-![Cluster-based risk stratification shows predictive power](Cluster-based risk stratification shows predictive power.png)
-![RFS and BORUTA reveal consistent results](RFS and BORUTA reveal consistent results.png)
-![ML models validate selected NMF predictors](ML models validate selected NMF predictors.png)
+![High risk cluster is associated with naïve T cells enrichment](High_risk_cluster.png)
+
+![Cluster-based risk stratification shows predictive power](Cluster-based_risk_stratification_shows_predictive_power.png)
+
+![RFS and BORUTA reveal consistent results](RFS_and_BORUTA_reveal_consistent_results.png)
+
+![ML models validate selected NMF predictors](ML_models_validate_selected_NMF_predictors.png)
 
 ## Literature
 - Ahmed, A., et al. (2018). Circulating HLA-DR+CD4+ effector memory T cells resistant to CCR5 and PD-L1 mediated suppression compromise regulatory T cell function in tuberculosis. *PLoS Pathogens*.
