@@ -1,77 +1,87 @@
 # GVHD_project
 
-*Проект*: Исследование предиктивной способности иммунологического статуса и особенностей кластеризации на развитие хронической реакции «трансплантат против хозяина» (хРТПХ) после трансплантации аллогенных гемопоэтических стволовых клеток (ТГСК).
+*Project*: Evaluation of the predictive ability of Immunological status and clustering patterns for Chronic Graft-Versus-Host Disease following Allogeneic Hematopoietic Stem Cell Transplantation.
 
-*Описание проекта*: Хроническая реакция «трансплантат против хозяина» (хРТПХ) является одним из наиболее частых и серьёзных осложнений после трансплантации аллогенных гемопоэтических стволовых клеток. Это состояние развивается у 50-80% пациентов и связано с иммунной дисрегуляцией, что делает изучение иммунологического статуса пациентов ключевым для понимания механизмов развития хРТПХ. В данном проекте мы исследуем предиктивную способность иммунологических параметров и особенностей кластеризации иммунных клеток для прогнозирования развития хРТПХ.
+*Project description*: Chronic graft-versus-host reaction (hGVHD) is one of the most frequent and serious complications after allogeneic hematopoietic stem cell transplantation. This condition develops in 50-80% of patients and is associated with immune dysregulation, making the study of the immunologic status of patients key to understanding the mechanisms of HSCT development. In this project, we investigate the prognostic ability of immunological parameters and immune cell clustering features to predict the development of CRPC.
 
-Проект выполняется командой 6 программы "Биостатистика" 2024/25 года Института Биоинформатики.
+The project is carried out by team 6 of the 2024/25 Biostatistics program of the Institute of Bioinformatics.
 
-## Проект выполнили:
+## Project was completed by:
 
-1. **Дмитрий Белоусов**  
-   - Вклад в проект: Разведочный анализ данных, кластеризация, NMF, PERMANOVA  
+1. **Dmitri Belousov**  
+   - Contributions to the project: Exploratory data analysis, clustering, NMF, PERMANOVA.  
    - Email: dmbelousov1806@gmail.com
 
-2. **Наталья Ласкина**  
-   - Вклад в проект: Разведочный анализ данных, логистическая регрессия, Lasso  
+2. **Natalya Laskina**  
+   - Project contribution: Exploratory data analysis, logistic regression, Lasso.  
    - Email: lask.natalia@gmail.com
 
-3. **Елена Марочкина**  
-   - Вклад в проект: Разведочный анализ данных, кластеризация, RFS, Boruta  
+3. **Elena Marochkina**  
+   - Contribution to the project: Exploratory data analysis, clustering, RFS, Boruta. 
    - Email: marochkina.lena@gmail.com
 
-4. **Сергей Смирнов**  
-   - Вклад в проект: Разведочный анализ данных, регрессия Кокса  
+4. **Sergey Smirnov**  
+   - Contribution to the project: Exploratory data analysis, Cox regression.  
    - Email: sergeysmirnov11111@gmail.com
 
-## Теоретические основы
+## Theoretical background
 
-### Этапы трансплантации костного мозга:
-1. **Кондиционирование (химиотерапия)**: Подготовка пациента к трансплантации, включающая уничтожение собственного костного мозга и подавление иммунной системы.
-2. **Трансплантация**: Введение донорских гемопоэтических стволовых клеток пациенту.
-3. **Приживление**: Восстановление кроветворной и иммунной системы за счёт донорских клеток.
+### Stages of bone marrow transplantation:
+1. **Conditioning (chemotherapy)**: Preparation of the patient for transplantation, involving destruction of the patient's own bone marrow and suppression of the immune system.
+2. **Transplantation**: The administration of donor hematopoietic stem cells to a patient.
+3. **Transplant**: Restoration of the hematopoietic and immune system using donor cells.
 
-### Варианты дальнейшего развития событий:
-- **Излечение**: Иммунная система восстанавливается быстрее, чем развивается опухоль.
-- **Возврат опухоли**: Иммунная система восстанавливается медленнее, чем развивается опухоль.
-- **Реакция «трансплантат против хозяина» (РТПХ)**: Дисрегуляция иммунной системы, приводящая к атаке донорских иммунных клеток на ткани реципиента.
+### Options for further developments:
+- **Cure**: The immune system recovers faster than the tumor develops.
+- **Tumor recurrence**: The immune system recovers more slowly than the tumor develops.
+- **Graft versus host reaction (GVR) **: Dysregulation of the immune system resulting in the attack of donor immune cells on recipient tissue.
 
-### Патогенез хронической РТПХ:
-1. **Повреждение и воспаление тканей**: Возникает из-за кондиционирования и острой РТПХ.
-2. **Нарушение регуляции иммунного ответа**: Нарушение центральной и периферической толерантности, что приводит к аутоиммунным реакциям.
-3. **Аберрантное восстановление тканей**: Развитие фиброза и других патологических изменений в тканях.
+### Pathogenesis of chronic RTPX:
+1. **Tissue damage and inflammation**: Occur as a result of conditioning and acute RTPX.
+2. **Disruption of immune response regulation**: Disruption of central and peripheral tolerance leading to autoimmune reactions.
+3. **Dysregulated tissue repair**: Development of fibrosis and other pathologic changes in tissues.
+### Problems:
+- 75% of patients with chronic RTPX require systemic immunosuppressive therapy, including steroids.
+- 50% of patients are resistant to steroid therapy.
+- 30% of patients become dependent on steroid immunosuppressive therapy.
+- Clinical phenotypes of the disease vary widely, but treatment approaches remain standardized.
 
-### Проблемы:
-- 75% пациентов с хронической РТПХ нуждаются в системной иммуносупрессивной терапии, включая стероиды.
-- 50% пациентов устойчивы к стероидной терапии.
-- 30% пациентов приобретают зависимость от стероидной иммуносупрессивной терапии.
-- Клинические фенотипы заболевания сильно различаются, но подходы к лечению остаются стандартизированными.
-
-## Исследование экспрессии маркеров функционального статуса
+### Functional status marker expression study
 
 ### CD39
-CD39 (эктонуклеозидтрифосфатдифосфогидролаза-1) — фермент, катализирующий гидролиз АТФ до аденозина, который обладает иммуносупрессивными свойствами. CD39 угнетает пролиферативную активность Т-клеток и снижает антиген-презентирующие свойства дендритных клеток. При воспалительных состояниях концентрация внеклеточного АТФ повышается, что усиливает роль CD39 в регуляции иммунного ответа.
+CD39 (ectonucleoside triphosphate diphosphohydrolase-1) is an enzyme that catalyzes the hydrolysis of ATP to adenosine, which has immunosuppressive properties. CD39 inhibits the proliferative activity of T cells and reduces antigen-presenting properties of dendritic cells. In inflammatory conditions, the concentration of extracellular ATP is increased, which enhances the role of CD39 in the regulation of the immune response.
 
 ### HLA-DR
-Т-хелперы (Тх), экспрессирующие HLA-DR, устойчивы к подавлению Т-регуляторными клетками (Трег) и продуцируют более высокие уровни цитокинов. Трег, экспрессирующие HLA-DR, обладают выраженными иммуносупрессивными свойствами и определяют супрессивную активность общего пула Трег.
+T-helper cells (Tx) expressing HLA-DR are resistant to suppression by T-regulatory cells (Treg) and produce higher levels of cytokines. Tregs expressing HLA-DR have marked immunosuppressive properties and determine the suppressive activity of the total Treg pool.
 
 ### PD-1
-Тх, экспрессирующие PD-1, характеризуются сниженной пролиферацией и продукцией цитокинов. Трег, экспрессирующие PD-1, обладают выраженными иммуносупрессивными свойствами и толерогенным потенциалом, способствуя формированию индуцированных Трег из нерегуляторных популяций Тх.
+Tregs expressing PD-1 are characterized by reduced proliferation and cytokine production. PD-1-expressing Tregs have marked immunosuppressive properties and tolerogenic potential, promoting the formation of induced Tregs from non-regulatory Tx populations.
 
 ### TIGIT
-Тх, экспрессирующие TIGIT, демонстрируют сниженный иммунный ответ. Трег TIGIT+ обладают выраженными иммуносупрессивными свойствами и специфически подавляют Тх 1-го и 17-го типа, но не Тх 2-го типа.
+Tx expressing TIGIT exhibit a reduced immune response. TIGIT+ Tregs have marked immunosuppressive properties and specifically suppress type 1 and 17 Tx, but not type 2 Tx.
 
 ### CD226
-Тх, экспрессирующие CD226, демонстрируют активный иммунный ответ. Экспрессия CD226 на Трег позволяет выделить более «чистую» линию Трег с более сильными супрессивными свойствами.
+Tx expressing CD226 exhibit an active immune response. Expression of CD226 on Tregs allows isolation of a more “pure” Treg lineage with stronger suppressive properties.
 
-## Начальное чтение:
+## Initial reading:
 - [Current Concepts and Advances in Graft-Versus-Host Disease Immunology](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8085043/)
 
-## Изображение исследования экспрессии маркеров функционального статуса
+## Imaging of functional status marker expression studies
 
-![Исследование экспрессии маркеров функционального статуса](photo_2025-01-27_23-32-58.jpg)
+![Study of the expression of markers of functional status](photo_2025-01-27_23-32-58.jpg)
 
-## Литература
+## Results
+
+- Stable clusters associated with cGVHD based on cell population compositions were identified and analysed;
+- High cGVHD Risk cluster was shown to be associated with naive T cells populations enrichment and lower counts of effector memory compartment;
+- BORUTA and RFS confirm effector memory T cells to be strong predictors of cGVHD;
+
+![High risk cluster is associated with naïve T cells enrichment](High risk cluster.png)
+![Cluster-based risk stratification shows predictive power](Cluster-based risk stratification shows predictive power.png)
+![RFS and BORUTA reveal consistent results](RFS and BORUTA reveal consistent results.png)
+![ML models validate selected NMF predictors](ML models validate selected NMF predictors.png)
+
+## Literature
 - Ahmed, A., et al. (2018). Circulating HLA-DR+CD4+ effector memory T cells resistant to CCR5 and PD-L1 mediated suppression compromise regulatory T cell function in tuberculosis. *PLoS Pathogens*.
 - Brown, M. E., et al. (2022). Human CD4+CD25+CD226- Tregs Demonstrate Increased Purity, Lineage Stability, and Suppressive Capacity Versus CD4+CD25+CD127lo/- Tregs for Adoptive Cell Therapy. *Frontiers in Immunology*.
 - Francisco, L. M., et al. (2010). The PD-1 Pathway in Tolerance and Autoimmunity. *Immunological Reviews*.
